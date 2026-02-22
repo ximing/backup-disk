@@ -66,7 +66,7 @@
         "Typecheck passes: go build 成功"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "任务管理核心，后续调度执行依赖此模块。"
     },
     {

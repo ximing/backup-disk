@@ -67,4 +67,27 @@
   - ListBuckets + ListObjects with MaxKeys(1) is the recommended validation approach
   - OSS SDK error messages contain patterns like "NoSuchKey", "AccessDenied" in error strings
   - Both S3 and OSS storage backends now share the same Storage interface
+
+## 2026-02-23T00:05:00+08:00 - US-004
+- Integrated robfig/cron/v3 for task scheduling
+- Created pkg/scheduler package with TaskScheduler, Task, and TaskConfig types
+- Implemented cron expression validation supporting standard 5-field format and presets (@daily, @hourly, etc.)
+- Added utility functions: GetNextRuns(), FormatDuration(), DescribeSchedule()
+- Created cron.go with preset definitions and schedule description helpers
+- Updated config validation to validate cron schedules during config load
+- TaskScheduler supports AddTask, RemoveTask, GetTask, GetAllTasks, Start, Stop operations
+- Avoided import cycle by defining local TaskConfig struct in scheduler package
+- Files changed:
+  - go.mod (added robfig/cron/v3 dependency)
+  - go.sum (updated with new dependency checksums)
+  - pkg/scheduler/scheduler.go (new file with scheduler implementation)
+  - pkg/scheduler/cron.go (new file with preset definitions)
+  - pkg/config/config.go (added cron import and schedule validation)
+  - prd.json (marked US-004 as complete)
+- **Learnings for future iterations:**
+  - scheduler package defines its own TaskConfig to avoid import cycle with config package
+  - robfig/cron/v3 supports both 5-field standard cron and preset descriptors (@daily, @hourly)
+  - Parser is stored separately in TaskScheduler since cron.Cron doesn't expose its parser
+  - Config validation now catches invalid cron expressions early
+  - Next step: US-005 (compression module) is independent of scheduler
 ---

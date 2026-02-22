@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/robfig/cron/v3"
 	"gopkg.in/yaml.v3"
 )
 
@@ -202,11 +203,28 @@ func (c *Config) validateTask(task TaskConfig, index int) error {
 		return fmt.Errorf("task %s: target.prefix is required", task.Name)
 	}
 
+	// Validate schedule expression
+	if err := validateSchedule(task.Schedule); err != nil {
+		return fmt.Errorf("task %s: invalid schedule: %w", task.Name, err)
+	}
+
 	// Validate date format if provided
 	if task.Target.DateFormat != "" {
 		// The format will be validated at runtime
 		// We just check it's not empty here
 	}
 
+	return nil
+}
+
+// validateSchedule validates a cron schedule expression
+func validateSchedule(schedule string) error {
+	parser := cron.NewParser(
+		cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+	)
+	_, err := parser.Parse(schedule)
+	if err != nil {
+		return fmt.Errorf("invalid schedule: %w", err)
+	}
 	return nil
 }
