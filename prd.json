@@ -84,7 +84,7 @@
         "Typecheck passes: go build 成功"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "独立模块，手动同步时需要调用。"
     },
     {
