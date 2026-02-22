@@ -133,4 +133,28 @@
   - Cleanup deletes all objects under a backup directory recursively
   - All times are handled in UTC to avoid timezone issues
   - Next step: US-007 (manual sync command) depends on storage, compression, and retention modules
+
+## 2026-02-23T01:00:00+08:00 - US-007
+- Implemented manual sync command `cloudsync sync <task-name>` and `cloudsync sync --all`
+- Created pkg/scanner package for file system scanning with include/exclude glob patterns
+- Created pkg/sync package to orchestrate scan → compress → upload workflow
+- Source scanner supports glob patterns with directory wildcards (e.g., "dir/**", "*.log")
+- Implemented progress tracking: files processed, bytes uploaded, duration
+- Support for --dry-run mode to preview changes without uploading
+- Concurrent uploads limited by semaphore (5 concurrent by default)
+- Comprehensive sync statistics: success/failed/skip counts, total bytes
+- Failed files recorded and reported at end of sync
+- Files changed:
+  - cmd/cloudsync/root.go (added sync subcommand)
+  - cmd/cloudsync/sync.go (new file with sync CLI implementation)
+  - pkg/scanner/scanner.go (new file with file scanning logic)
+  - pkg/sync/sync.go (new file with sync execution logic)
+  - prd.json (marked US-007 as complete)
+- **Learnings for future iterations:**
+  - Scanner uses filepath.WalkDir for efficient directory traversal
+  - Pattern matching supports both file paths and base names for flexibility
+  - Sync execution uses goroutines with semaphore for controlled concurrency
+  - Date format in target path follows Go time layout (default: 2006/01/02/150405)
+  - Upload flow: open file → compress if needed → upload to {prefix}/{date}/{filename}
+  - Next step: US-008 (daemon mode) depends on scheduler and sync modules
 ---

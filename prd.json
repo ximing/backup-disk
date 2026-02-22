@@ -120,7 +120,7 @@
         "Typecheck passes: go build 成功"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "核心功能，依赖存储、压缩、任务配置等前置模块。"
     },
     {
