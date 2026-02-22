@@ -1,0 +1,29 @@
+## Codebase Patterns
+- Project structure follows standard Go layout: cmd/, pkg/, internal/
+- CLI commands use cobra framework, defined in cmd/cloudsync/
+- Configuration package in pkg/config/ handles YAML parsing and validation
+- Logger package in pkg/logger/ provides structured logging with task-specific outputs
+- Environment variables in config are expanded using os.ExpandEnv()
+- Config directory: ~/.cloudsync/, logs: ~/.cloudsync/logs/, data: ~/.cloudsync/data/
+
+## 2024-02-22T23:15:00+08:00 - US-001
+- Implemented Go project structure with cmd/, pkg/config/, pkg/logger/, internal/ directories
+- Created go.mod with cobra and yaml.v3 dependencies
+- Implemented `cloudsync init` command that generates default config at ~/.cloudsync/config.yaml
+- Implemented `cloudsync validate` command that validates YAML syntax and configuration
+- Created directory structure: ~/.cloudsync/logs/ and ~/.cloudsync/data/
+- Files changed:
+  - go.mod
+  - cmd/cloudsync/main.go
+  - cmd/cloudsync/root.go
+  - cmd/cloudsync/init.go
+  - cmd/cloudsync/validate.go
+  - pkg/config/config.go
+  - pkg/config/default.go
+  - pkg/logger/logger.go
+- **Learnings for future iterations:**
+  - Configuration uses environment variable expansion: ${VAR_NAME} syntax
+  - Storage backends must implement the Storage interface (to be defined in US-002)
+  - Tasks require cron expression parsing (robfig/cron/v3 will be added in US-004)
+  - Code uses standard Go project layout with clear separation between cmd/ and pkg/
+---
