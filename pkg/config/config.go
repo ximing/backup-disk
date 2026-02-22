@@ -123,6 +123,16 @@ func GetConfigPath() string {
 	return filepath.Join(GetConfigDir(), "config.yaml")
 }
 
+// GetLogDir returns the log directory path
+func GetLogDir() string {
+	return filepath.Join(GetConfigDir(), "logs")
+}
+
+// GetDataDir returns the data directory path
+func GetDataDir() string {
+	return filepath.Join(GetConfigDir(), "data")
+}
+
 // Load loads configuration from the specified file
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)

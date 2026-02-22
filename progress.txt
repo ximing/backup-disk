@@ -134,6 +134,31 @@
   - All times are handled in UTC to avoid timezone issues
   - Next step: US-007 (manual sync command) depends on storage, compression, and retention modules
 
+## 2026-02-23T01:30:00+08:00 - US-008
+- Implemented daemon mode with `cloudsync daemon start/stop/status` commands
+- Created pkg/daemon package with PID file management, signal handling, and graceful shutdown
+- Daemon supports foreground mode (`--foreground` flag) for debugging
+- Implemented SIGTERM/SIGINT handling for graceful exit (completes current tasks)
+- Implemented SIGHUP handling for configuration reload without restart
+- Daemon registers all configured tasks with the scheduler on startup
+- Task execution handler integrates with existing sync.Executor
+- PID file stored at ~/.cloudsync/data/cloudsync.pid
+- Added GetLogDir() and GetDataDir() helper functions to config package
+- Files changed:
+  - pkg/daemon/daemon.go (new file with daemon lifecycle management)
+  - cmd/cloudsync/daemon.go (new file with CLI commands)
+  - cmd/cloudsync/root.go (added daemon subcommand)
+  - pkg/config/config.go (added GetLogDir and GetDataDir functions)
+  - prd.json (marked US-008 as complete)
+- **Learnings for future iterations:**
+  - Used `gosync` and `syncpkg` aliases to avoid package name conflicts with standard library `sync`
+  - Daemon uses fork()+setsid() for Unix daemonization, redirecting stdio to /dev/null
+  - Signal 0 can be used to check if a process exists without affecting it
+  - Scheduler's Stop() method waits for current jobs to complete before returning
+  - Configuration reload creates a new scheduler instance to avoid stopping during task execution
+  - When daemonizing, must open log file before redirecting stdout/stderr to /dev/null
+  - Next step: US-009 (logging and status query) will need to integrate with daemon's task execution
+
 ## 2026-02-23T01:00:00+08:00 - US-007
 - Implemented manual sync command `cloudsync sync <task-name>` and `cloudsync sync --all`
 - Created pkg/scanner package for file system scanning with include/exclude glob patterns

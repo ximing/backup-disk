@@ -138,7 +138,7 @@
         "Typecheck passes: go build 成功"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "依赖调度器和手动同步功能。"
     },
     {
