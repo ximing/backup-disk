@@ -48,4 +48,23 @@
   - Error handling uses smithyError interface to extract AWS error codes
   - OSS storage placeholder is in factory.go - will be implemented in US-003
   - Build requires GOPROXY to be set in this environment (use goproxy.cn for faster downloads)
+
+## 2026-02-22T23:55:00+08:00 - US-003
+- Implemented OSSStorage using aliyun-oss-go-sdk
+- Created OSSConfig struct with endpoint, bucket, access_key_id, access_key_secret fields
+- Implemented Upload, List, Delete, Validate methods matching S3Storage interface
+- Updated factory.go to create OSS storage instances from config
+- Credential validation uses ListBuckets API and bucket ListObjects with max 1 key
+- Added error conversion for OSS-specific error patterns
+- Files changed:
+  - go.mod (added aliyun-oss-go-sdk dependency)
+  - go.sum (updated with new dependency checksums)
+  - pkg/storage/oss.go (new file with OSS implementation)
+  - pkg/storage/factory.go (updated NewOSSStorageFromConfig function)
+  - prd.json (marked US-003 as complete)
+- **Learnings for future iterations:**
+  - OSS SDK uses different method naming than AWS SDK (no GetBucketInfo/GetBucketACL)
+  - ListBuckets + ListObjects with MaxKeys(1) is the recommended validation approach
+  - OSS SDK error messages contain patterns like "NoSuchKey", "AccessDenied" in error strings
+  - Both S3 and OSS storage backends now share the same Storage interface
 ---

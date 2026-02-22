@@ -53,6 +53,24 @@ Common AWS error codes:
 - `AccessDenied`, `Forbidden` - Permission denied
 - `NoSuchBucket` - Bucket not found
 
+## Aliyun OSS SDK Error Handling
+
+For OSS storage, errors are detected by checking error message strings:
+
+```go
+switch {
+case strings.Contains(lowerErr, "nosuchkey"):
+    return &StorageError{Message: "not found", Cause: err}
+case strings.Contains(lowerErr, "invalidaccesskeyid"):
+    return &StorageError{Message: "invalid credentials", Cause: err}
+}
+```
+
+Note: OSS SDK uses different API patterns than AWS SDK:
+- Validation uses `client.ListBuckets()` and `bucket.ListObjects(oss.MaxKeys(1))`
+- No `GetBucketInfo` or `GetBucketACL` methods available on Bucket type
+- Pagination uses `Marker` and `NextMarker` instead of continuation tokens
+
 ## Factory Pattern
 
 Use `NewStorage(config)` from `factory.go` to create storage instances:

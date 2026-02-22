@@ -36,7 +36,13 @@ func NewS3StorageFromConfig(cfg config.S3Config) (Storage, error) {
 }
 
 // NewOSSStorageFromConfig creates OSS storage from config.OSSConfig
-// This is a placeholder that will be implemented in US-003
 func NewOSSStorageFromConfig(cfg config.OSSConfig) (Storage, error) {
-	return nil, fmt.Errorf("OSS storage not yet implemented (US-003)")
+	ossCfg := OSSConfig{
+		Endpoint:        cfg.Endpoint,
+		Bucket:          cfg.Bucket,
+		AccessKeyID:     cfg.AccessKeyID,
+		AccessKeySecret: cfg.AccessKeySecret,
+	}
+
+	return NewOSSStorage(ossCfg)
 }

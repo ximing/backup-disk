@@ -49,7 +49,7 @@
         "Typecheck passes: go build 成功"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "扩展存储支持，与 US-002 并行但依赖 Storage 接口定义。"
     },
     {
