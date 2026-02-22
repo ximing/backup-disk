@@ -15,6 +15,7 @@ import (
 	"github.com/ximing/cloudsync/pkg/compress"
 	"github.com/ximing/cloudsync/pkg/config"
 	"github.com/ximing/cloudsync/pkg/logger"
+	"github.com/ximing/cloudsync/pkg/notify"
 	"github.com/ximing/cloudsync/pkg/scheduler"
 	"github.com/ximing/cloudsync/pkg/state"
 	"github.com/ximing/cloudsync/pkg/storage"
@@ -352,7 +353,62 @@ func (d *Daemon) handleTask(ctx context.Context, task scheduler.TaskConfig) erro
 		d.logger.TaskWarn(task.Name, fmt.Sprintf("Task completed with %d failures", result.FilesFailed))
 	}
 
+	// Send notification
+	d.sendNotification(ctx, taskCfg, result, err)
+
 	return nil
+}
+
+// sendNotification sends a notification for task completion
+func (d *Daemon) sendNotification(ctx context.Context, taskCfg *config.TaskConfig, result *syncpkg.Result, execErr error) {
+	// Build notification config
+	notifyConfig := notify.BuildConfig(d.cfg.Notify, taskCfg.Notify, taskCfg.Name)
+	if !notifyConfig.Enabled {
+		return
+	}
+
+	// Create notifier
+	notifier := notify.NewNotifier(notifyConfig, d.logger)
+
+	// Build result
+	status := "success"
+	if !result.Success {
+		status = "failed"
+	}
+
+	errorMsg := ""
+	if execErr != nil {
+		errorMsg = execErr.Error()
+	} else if len(result.FailedFiles) > 0 {
+		errorMsg = fmt.Sprintf("%d files failed", len(result.FailedFiles))
+	}
+
+	notifyResult := &notify.Result{
+		TaskName:     taskCfg.Name,
+		Status:       status,
+		Duration:     result.Duration(),
+		FileCount:    result.FilesTotal,
+		SuccessCount: result.FilesSuccess,
+		FailedCount:  result.FilesFailed,
+		SkippedCount: result.FilesSkipped,
+		BytesTotal:   result.BytesTotal,
+		BytesSuccess: result.BytesSuccess,
+		Error:        errorMsg,
+		StartTime:    result.StartTime,
+		EndTime:      result.EndTime,
+	}
+
+	// Check if we should notify
+	if !notifier.ShouldNotify(notifyResult) {
+		return
+	}
+
+	// Send notification
+	if err := notifier.Send(ctx, notifyResult); err != nil {
+		d.logger.Warnf("Failed to send notification: %v", err)
+	} else {
+		d.logger.Debugf("Notification sent for task %s", taskCfg.Name)
+	}
 }
 
 // setupSignalHandling sets up signal handlers for graceful shutdown

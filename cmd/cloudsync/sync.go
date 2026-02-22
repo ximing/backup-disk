@@ -7,6 +7,7 @@ import (
 	"github.com/ximing/cloudsync/pkg/compress"
 	"github.com/ximing/cloudsync/pkg/config"
 	"github.com/ximing/cloudsync/pkg/logger"
+	"github.com/ximing/cloudsync/pkg/notify"
 	"github.com/ximing/cloudsync/pkg/state"
 	"github.com/ximing/cloudsync/pkg/storage"
 	syncpkg "github.com/ximing/cloudsync/pkg/sync"
@@ -112,7 +113,7 @@ func runSync(cmd *cobra.Command, args []string, dryRun bool) error {
 	var results []*syncpkg.Result
 
 	for _, task := range tasks {
-		result := executeTaskWithState(ctx, executor, stateStore, log, task, dryRun)
+		result := executeTaskWithState(ctx, executor, stateStore, log, cfg, task, dryRun)
 		results = append(results, result)
 	}
 
@@ -148,7 +149,7 @@ func runSync(cmd *cobra.Command, args []string, dryRun bool) error {
 }
 
 // executeTaskWithState executes a task and records its state
-func executeTaskWithState(ctx context.Context, executor *syncpkg.Executor, stateStore *state.Store, log *logger.Logger, task config.TaskConfig, dryRun bool) *syncpkg.Result {
+func executeTaskWithState(ctx context.Context, executor *syncpkg.Executor, stateStore *state.Store, log *logger.Logger, cfg *config.Config, task config.TaskConfig, dryRun bool) *syncpkg.Result {
 	// Start execution recording
 	execID, err := stateStore.StartExecution(task.Name)
 	if err != nil {
@@ -207,5 +208,62 @@ func executeTaskWithState(ctx context.Context, executor *syncpkg.Executor, state
 		}
 	}
 
+	// Send notification
+	if !dryRun {
+		sendNotification(ctx, cfg, task, result, err, log)
+	}
+
 	return result
+}
+
+// sendNotification sends a notification for task completion
+func sendNotification(ctx context.Context, cfg *config.Config, task config.TaskConfig, result *syncpkg.Result, execErr error, log *logger.Logger) {
+	// Build notification config
+	notifyConfig := notify.BuildConfig(cfg.Notify, task.Notify, task.Name)
+	if !notifyConfig.Enabled {
+		return
+	}
+
+	// Create notifier
+	notifier := notify.NewNotifier(notifyConfig, log)
+
+	// Build result
+	status := "success"
+	if !result.Success {
+		status = "failed"
+	}
+
+	errorMsg := ""
+	if execErr != nil {
+		errorMsg = execErr.Error()
+	} else if len(result.FailedFiles) > 0 {
+		errorMsg = fmt.Sprintf("%d files failed", len(result.FailedFiles))
+	}
+
+	notifyResult := &notify.Result{
+		TaskName:     task.Name,
+		Status:       status,
+		Duration:     result.Duration(),
+		FileCount:    result.FilesTotal,
+		SuccessCount: result.FilesSuccess,
+		FailedCount:  result.FilesFailed,
+		SkippedCount: result.FilesSkipped,
+		BytesTotal:   result.BytesTotal,
+		BytesSuccess: result.BytesSuccess,
+		Error:        errorMsg,
+		StartTime:    result.StartTime,
+		EndTime:      result.EndTime,
+	}
+
+	// Check if we should notify
+	if !notifier.ShouldNotify(notifyResult) {
+		return
+	}
+
+	// Send notification
+	if err := notifier.Send(ctx, notifyResult); err != nil {
+		log.Warnf("Failed to send notification: %v", err)
+	} else {
+		log.Debugf("Notification sent for task %s", task.Name)
+	}
 }

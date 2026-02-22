@@ -192,7 +192,7 @@
         "Typecheck passes: go build 成功"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "独立模块，需要在任务执行完成后调用。"
     },
     {

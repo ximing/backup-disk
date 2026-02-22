@@ -8,6 +8,7 @@
 - State database: ~/.cloudsync/data/state.db using SQLite via modernc.org/sqlite
 - Log rotation uses 100MB limit with 5 backup files by default
 - State tracking is done via pkg/state with StartExecution/CompleteExecution pattern
+- Notification uses pkg/notify with MeoWNotifier, supports always/on-error/never levels
 
 ## 2024-02-22T23:15:00+08:00 - US-001
 - Implemented Go project structure with cmd/, pkg/config/, pkg/logger/, internal/ directories
@@ -236,4 +237,25 @@
   - Shared formatBytes helper function defined in history.go is reused by cleanup.go
   - Retention manager from pkg/retention handles the actual cleanup logic and policy enforcement
   - Next step: US-011 (MeoW push notification) is an independent feature
+
+## 2026-02-23T03:00:00+08:00 - US-011
+- Implemented MeoW push notification package in pkg/notify
+- Created Notifier interface with MeoWNotifier implementation
+- Supports notification levels: always, on-error, never
+- Uses Go text/template for message rendering with variables (TaskName, Duration, Status, etc.)
+- Integrated notifications in both manual sync and daemon task execution
+- Notification failures are logged as warnings but don't affect backup tasks
+- API endpoint: POST {url}?msgType=html&htmlHeight=350 with JSON body
+- Files changed:
+  - pkg/notify/notifier.go (new file with MeoWNotifier implementation)
+  - pkg/notify/config.go (new file with notification config builder)
+  - cmd/cloudsync/sync.go (updated to send notifications after task completion)
+  - pkg/daemon/daemon.go (updated to send notifications in task handler)
+  - prd.json (marked US-011 as complete)
+- **Learnings for future iterations:**
+  - Notification config hierarchy: global notify config provides defaults, task-specific settings override
+  - Template functions (formatBytes) are registered via template.FuncMap
+  - Notifications are sent asynchronously and failures don't block task execution
+  - The notify.Result struct mirrors sync.Result for easy conversion
+  - Next step: US-012 (retry and error handling) will need to integrate with notifications
 ---
