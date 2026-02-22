@@ -217,4 +217,23 @@
   - Execution records store both start and end times for duration calculation
   - State tracking is integrated in both manual sync and daemon task execution paths
   - Next step: US-010 (cleanup command) depends on retention module
+
+## 2026-02-23T02:30:00+08:00 - US-010
+- Implemented cleanup command `cloudsync cleanup <task-name>` and `cloudsync cleanup --all`
+- Integrated with existing retention package from US-006 for policy evaluation
+- Supports --dry-run flag to preview deletions without actually deleting
+- Interactive confirmation prompt with --force flag to skip confirmation
+- Applies retention policy hierarchy: task-specific > global config
+- Cleanup statistics output: deleted directories count and freed space
+- Preview mode shows detailed list of backups to be deleted with sizes
+- Files changed:
+  - cmd/cloudsync/cleanup.go (new file with cleanup command implementation)
+  - cmd/cloudsync/root.go (added cleanup subcommand)
+  - prd.json (marked US-010 as complete)
+- **Learnings for future iterations:**
+  - Retention policy resolution: task-specific retention config takes precedence over global config
+  - Cleanup uses two-pass approach: first scan/preview, then execute after confirmation
+  - Shared formatBytes helper function defined in history.go is reused by cleanup.go
+  - Retention manager from pkg/retention handles the actual cleanup logic and policy enforcement
+  - Next step: US-011 (MeoW push notification) is an independent feature
 ---

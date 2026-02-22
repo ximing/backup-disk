@@ -174,7 +174,7 @@
         "Typecheck passes: go build 成功"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "依赖保留策略模块（US-006）。"
     },
     {
