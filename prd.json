@@ -17,7 +17,7 @@
         "Typecheck passes: go build 成功"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "项目基础，必须最先完成。包含 CLI 框架搭建和配置管理基础。"
     },
     {
