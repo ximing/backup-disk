@@ -9,6 +9,7 @@
 - Log rotation uses 100MB limit with 5 backup files by default
 - State tracking is done via pkg/state with StartExecution/CompleteExecution pattern
 - Notification uses pkg/notify with MeoWNotifier, supports always/on-error/never levels
+- Retry uses pkg/retry with exponential backoff (1s, 2s, 4s) and error classification
 
 ## 2024-02-22T23:15:00+08:00 - US-001
 - Implemented Go project structure with cmd/, pkg/config/, pkg/logger/, internal/ directories
@@ -258,4 +259,25 @@
   - Notifications are sent asynchronously and failures don't block task execution
   - The notify.Result struct mirrors sync.Result for easy conversion
   - Next step: US-012 (retry and error handling) will need to integrate with notifications
+
+## 2026-02-23T03:30:00+08:00 - US-012
+- Implemented retry package with exponential backoff in pkg/retry
+- Exponential backoff: 1s, 2s, 4s delays between retries (configurable)
+- Error classification: recoverable (network timeout, rate limit) vs non-recoverable (auth failure)
+- Max retries configurable via global.max_retries (default: 3)
+- Non-recoverable errors fail immediately without retry
+- Integrated retry logic in file upload within sync.Executor
+- Files changed:
+  - pkg/retry/retry.go (new file with retry logic and error classification)
+  - pkg/config/config.go (added max_retries to GlobalConfig)
+  - pkg/sync/sync.go (updated uploadFile with retry logic)
+  - cmd/cloudsync/sync.go (pass max_retries to sync options)
+  - pkg/daemon/daemon.go (pass max_retries to sync options)
+  - prd.json (marked US-012 as complete)
+- **Learnings for future iterations:**
+  - Error classification uses string matching for common error patterns (timeout, access denied, etc.)
+  - Exponential backoff multiplier is configurable (default: 2x)
+  - Context cancellation is checked between retry attempts
+  - Retry logic is applied per-file during upload, not per-task
+  - ALL 12 user stories are now complete! The CloudSync CLI is feature complete.
 ---

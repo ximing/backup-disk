@@ -21,8 +21,9 @@ type Config struct {
 
 // GlobalConfig represents global settings
 type GlobalConfig struct {
-	LogLevel  string `yaml:"log_level"`
-	LogFormat string `yaml:"log_format"`
+	LogLevel   string      `yaml:"log_level"`
+	LogFormat  string      `yaml:"log_format"`
+	MaxRetries int         `yaml:"max_retries,omitempty"` // Default: 3
 }
 
 // StorageConfig represents storage backend configuration

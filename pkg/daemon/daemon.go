@@ -305,6 +305,7 @@ func (d *Daemon) handleTask(ctx context.Context, task scheduler.TaskConfig) erro
 		DryRun:      false,
 		DateFormat:  task.Target.DateFormat,
 		Compression: compressionConfig,
+		MaxRetries:  d.cfg.Global.MaxRetries,
 	}
 
 	result, err := executor.Execute(ctx, *taskCfg, opts)

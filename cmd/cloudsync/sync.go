@@ -170,6 +170,7 @@ func executeTaskWithState(ctx context.Context, executor *syncpkg.Executor, state
 		DryRun:      dryRun,
 		DateFormat:  task.Target.DateFormat,
 		Compression: compressionConfig,
+		MaxRetries:  cfg.Global.MaxRetries,
 	}
 
 	// Execute the task

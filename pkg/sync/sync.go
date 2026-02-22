@@ -15,6 +15,7 @@ import (
 	"github.com/ximing/cloudsync/pkg/compress"
 	"github.com/ximing/cloudsync/pkg/config"
 	"github.com/ximing/cloudsync/pkg/logger"
+	"github.com/ximing/cloudsync/pkg/retry"
 	"github.com/ximing/cloudsync/pkg/scanner"
 	"github.com/ximing/cloudsync/pkg/storage"
 )
@@ -93,6 +94,7 @@ type Options struct {
 	DryRun      bool
 	DateFormat  string
 	Compression compress.Config
+	MaxRetries  int // Max retries for file uploads (default: 3)
 }
 
 // Executor handles task execution
@@ -187,7 +189,7 @@ func (e *Executor) Execute(ctx context.Context, task config.TaskConfig, opts Opt
 			defer wg.Done()
 			defer func() { <-semaphore }() // Release semaphore
 
-			err := e.uploadFile(ctx, task.Name, f, targetPrefix, compressor)
+			err := e.uploadFile(ctx, task.Name, f, targetPrefix, compressor, opts.MaxRetries)
 			if err != nil {
 				e.logger.TaskError(task.Name, fmt.Sprintf("Failed to upload %s: %v", f.RelativePath, err))
 				stats.IncrementFilesFailed(f.RelativePath)
@@ -221,8 +223,8 @@ func (e *Executor) Execute(ctx context.Context, task config.TaskConfig, opts Opt
 	return result, nil
 }
 
-// uploadFile uploads a single file
-func (e *Executor) uploadFile(ctx context.Context, taskName string, file scanner.FileInfo, targetPrefix string, compressor compress.Compressor) error {
+// uploadFile uploads a single file with retry logic
+func (e *Executor) uploadFile(ctx context.Context, taskName string, file scanner.FileInfo, targetPrefix string, compressor compress.Compressor, maxRetries int) error {
 	// Determine if we should compress
 	shouldCompress := compressor.ShouldCompress(file.Path, file.Size)
 
@@ -236,6 +238,24 @@ func (e *Executor) uploadFile(ctx context.Context, taskName string, file scanner
 
 	e.logger.TaskDebug(taskName, fmt.Sprintf("Uploading: %s -> %s", file.RelativePath, remotePath))
 
+	// Prepare upload with retry logic
+	retryConfig := retry.Config{
+		MaxRetries: maxRetries,
+		BaseDelay:  1 * time.Second,
+		Multiplier: 2,
+	}
+
+	if retryConfig.MaxRetries <= 0 {
+		retryConfig.MaxRetries = 3 // Default
+	}
+
+	return retry.Retry(ctx, retryConfig, retry.IsRecoverableError, func() error {
+		return e.doUpload(ctx, file, remotePath, compressor, shouldCompress)
+	})
+}
+
+// doUpload performs the actual file upload
+func (e *Executor) doUpload(ctx context.Context, file scanner.FileInfo, remotePath string, compressor compress.Compressor, shouldCompress bool) error {
 	// Open file
 	f, err := os.Open(file.Path)
 	if err != nil {
@@ -255,8 +275,6 @@ func (e *Executor) uploadFile(ctx context.Context, taskName string, file scanner
 	}
 
 	// Create a temp file for upload (since storage interface expects local path)
-	// In a real implementation, we might want to add a method to upload from reader
-	// For now, we'll write to temp file if compressed
 	uploadPath := file.Path
 	if shouldCompress {
 		tempFile, err := os.CreateTemp("", "cloudsync-*")
