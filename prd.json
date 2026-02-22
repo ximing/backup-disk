@@ -101,7 +101,7 @@
         "Typecheck passes: go build 成功"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "清理功能依赖此模块。"
     },
     {

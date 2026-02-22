@@ -90,4 +90,47 @@
   - Parser is stored separately in TaskScheduler since cron.Cron doesn't expose its parser
   - Config validation now catches invalid cron expressions early
   - Next step: US-005 (compression module) is independent of scheduler
+
+## 2026-02-22T00:20:00+08:00 - US-005
+- Implemented compression module with Compressor interface
+- Created gzip compressor using Go standard library (compress/gzip)
+- Created zstd compressor using github.com/klauspost/compress/zstd
+- Implemented compression level support (1-9) for both formats
+- Added file filtering: min_size threshold, include_extensions whitelist, exclude_extensions blacklist
+- Created NoopCompressor for when compression is disabled
+- Compression extensions: .gz for gzip, .zst for zstd
+- Files changed:
+  - pkg/compress/interface.go (Compressor interface and Config struct)
+  - pkg/compress/gzip.go (GzipCompressor with streaming compression)
+  - pkg/compress/zstd.go (ZstdCompressor with level mapping)
+  - go.mod (added klauspost/compress v1.18.4)
+  - go.sum (updated with new checksums)
+  - prd.json (marked US-005 as complete)
+- **Learnings for future iterations:**
+  - Compression uses io.Pipe() for streaming to avoid loading entire files in memory
+  - Extension matching is case-insensitive (strings.ToLower used)
+  - zstd levels map: 1-2 -> SpeedFastest, 3-5 -> SpeedDefault, 6-8 -> SpeedBetterCompression, 9 -> SpeedBestCompression
+  - NoopCompressor returns empty extension when compression is disabled
+  - Build requires GOPROXY=https://goproxy.cn in this environment
+
+## 2026-02-23T00:35:00+08:00 - US-006
+- Implemented retention policy management package
+- Created RetentionManager with Policy struct (MaxDays, MaxVersions)
+- Implemented backup listing from cloud storage with date parsing
+- Date parsing extracts timestamp from path format: {prefix}/{YYYY}/{MM}/{DD}/{HHmmss}/
+- Implemented cleanup logic supporting both max_days and max_versions policies
+- Added dry-run mode to preview deletions without actually deleting
+- Created comprehensive tests for all retention scenarios
+- Files changed:
+  - pkg/retention/retention.go (new file with retention manager)
+  - pkg/retention/retention_test.go (comprehensive tests)
+  - pkg/retention/CLAUDE.md (documentation for the package)
+  - prd.json (marked US-006 as complete)
+- **Learnings for future iterations:**
+  - Backup times are parsed from directory paths, not object modification times
+  - Retention manager groups objects by backup directory (based on YYYY/MM/DD/HHmmss path components)
+  - Policy evaluation: max_days is applied first, then max_versions on remaining backups
+  - Cleanup deletes all objects under a backup directory recursively
+  - All times are handled in UTC to avoid timezone issues
+  - Next step: US-007 (manual sync command) depends on storage, compression, and retention modules
 ---
