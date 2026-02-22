@@ -26,4 +26,26 @@
   - Storage backends must implement the Storage interface (to be defined in US-002)
   - Tasks require cron expression parsing (robfig/cron/v3 will be added in US-004)
   - Code uses standard Go project layout with clear separation between cmd/ and pkg/
+
+## 2026-02-22T23:45:00+08:00 - US-002
+- Defined Storage interface with Upload, List, Delete, Validate methods
+- Implemented S3Storage using AWS SDK v2
+- Created factory function NewStorage() for creating storage instances based on config
+- Implemented credential validation using ListBuckets API call
+- Added error conversion layer to map AWS errors to domain-specific StorageError types
+- Updated go.mod with AWS SDK v2 dependencies
+- Files changed:
+  - go.mod (added AWS SDK dependencies)
+  - go.sum (new file with all dependency checksums)
+  - pkg/storage/interface.go (Storage interface and ObjectInfo struct)
+  - pkg/storage/s3.go (S3Storage implementation)
+  - pkg/storage/factory.go (storage factory function)
+  - prd.json (marked US-002 as complete)
+- **Learnings for future iterations:**
+  - Storage interface is located in pkg/storage/interface.go - all new backends must implement it
+  - S3Storage uses AWS SDK v2 with support for custom endpoints (S3-compatible services like MinIO)
+  - Environment variables are already expanded in config before being passed to storage constructors
+  - Error handling uses smithyError interface to extract AWS error codes
+  - OSS storage placeholder is in factory.go - will be implemented in US-003
+  - Build requires GOPROXY to be set in this environment (use goproxy.cn for faster downloads)
 ---

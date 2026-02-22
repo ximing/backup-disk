@@ -33,7 +33,7 @@
         "Typecheck passes: go build 成功"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "存储层基础，后续上传功能依赖此接口。"
     },
     {
