@@ -21,11 +21,12 @@ const (
 
 // Logger represents a logger instance
 type Logger struct {
-	level      LogLevel
-	format     string // text or json
-	output     io.Writer
-	taskOutput map[string]io.Writer
-	mu         sync.RWMutex
+	level         LogLevel
+	format        string // text or json
+	output        io.Writer
+	taskOutput    map[string]io.Writer
+	taskLogManager *TaskLogManager
+	mu            sync.RWMutex
 }
 
 var (
@@ -69,6 +70,41 @@ func NewFileLogger(level LogLevel, format, logDir string) (*Logger, error) {
 	}
 
 	return New(level, format, f), nil
+}
+
+// NewRotatingLogger creates a logger with log rotation support
+func NewRotatingLogger(level LogLevel, format, logDir string, maxSize int64, maxBackups int) (*Logger, error) {
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create log directory: %w", err)
+	}
+
+	logFile := filepath.Join(logDir, "cloudsync.log")
+	rotator, err := NewRotatingWriter(logFile, maxSize, maxBackups)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rotating log writer: %w", err)
+	}
+
+	return &Logger{
+		level:          level,
+		format:         format,
+		output:         rotator,
+		taskOutput:     make(map[string]io.Writer),
+		taskLogManager: NewTaskLogManager(logDir, maxSize, maxBackups),
+	}, nil
+}
+
+// SetTaskLogManager sets the task log manager
+func (l *Logger) SetTaskLogManager(tlm *TaskLogManager) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.taskLogManager = tlm
+}
+
+// GetTaskLogManager returns the task log manager
+func (l *Logger) GetTaskLogManager() *TaskLogManager {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.taskLogManager
 }
 
 // SetLevel sets the logging level
@@ -158,8 +194,14 @@ func (l *Logger) log(level LogLevel, msg string, taskName *string) {
 
 	var output io.Writer = l.output
 	if taskName != nil {
+		// First check for direct task output
 		if taskOut, ok := l.taskOutput[*taskName]; ok {
 			output = taskOut
+		} else if l.taskLogManager != nil {
+			// Try to get task log writer
+			if writer, err := l.taskLogManager.GetWriter(*taskName); err == nil {
+				output = writer
+			}
 		}
 	}
 

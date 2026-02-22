@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/ximing/cloudsync/pkg/compress"
 	"github.com/ximing/cloudsync/pkg/config"
 	"github.com/ximing/cloudsync/pkg/logger"
+	"github.com/ximing/cloudsync/pkg/state"
 	"github.com/ximing/cloudsync/pkg/storage"
-	"github.com/ximing/cloudsync/pkg/sync"
+	syncpkg "github.com/ximing/cloudsync/pkg/sync"
 
 	"github.com/spf13/cobra"
 )
@@ -79,10 +79,21 @@ func runSync(cmd *cobra.Command, args []string, dryRun bool) error {
 		}
 	}
 
-	// Initialize logger
+	// Initialize logger with rotation
+	logDir := config.GetLogDir()
 	logLevel := logger.ParseLevel(cfg.Global.LogLevel)
-	log := logger.New(logLevel, cfg.Global.LogFormat, os.Stdout)
+	log, err := logger.NewRotatingLogger(logLevel, cfg.Global.LogFormat, logDir, 100*1024*1024, 5)
+	if err != nil {
+		return fmt.Errorf("failed to create logger: %w", err)
+	}
 	logger.SetGlobalLogger(log)
+
+	// Initialize state database
+	stateStore, err := state.New(state.GetDBPath())
+	if err != nil {
+		return fmt.Errorf("failed to open state database: %w", err)
+	}
+	defer stateStore.Close()
 
 	// Initialize storage
 	store, err := storage.NewStorage(cfg)
@@ -97,30 +108,11 @@ func runSync(cmd *cobra.Command, args []string, dryRun bool) error {
 	}
 
 	// Execute tasks
-	executor := sync.NewExecutor(store, log)
-	var results []*sync.Result
+	executor := syncpkg.NewExecutor(store, log)
+	var results []*syncpkg.Result
 
 	for _, task := range tasks {
-		// Build compression config from task
-		compressionConfig := compress.Config{
-			Enabled:           task.Compression.Enabled,
-			Type:              task.Compression.Type,
-			Level:             task.Compression.Level,
-			MinSize:           task.Compression.MinSize,
-			IncludeExtensions: task.Compression.IncludeExtensions,
-			ExcludeExtensions: task.Compression.ExcludeExtensions,
-		}
-
-		opts := sync.Options{
-			DryRun:      dryRun,
-			DateFormat:  task.Target.DateFormat,
-			Compression: compressionConfig,
-		}
-
-		result, err := executor.Execute(ctx, task, opts)
-		if err != nil {
-			log.Errorf("Task %s failed: %v", task.Name, err)
-		}
+		result := executeTaskWithState(ctx, executor, stateStore, log, task, dryRun)
 		results = append(results, result)
 	}
 
@@ -138,14 +130,14 @@ func runSync(cmd *cobra.Command, args []string, dryRun bool) error {
 			allSuccess = false
 		}
 		fmt.Printf("%s %s: %d files, %s, %v\n",
-			status, r.TaskName, r.FilesSuccess, sync.FormatBytes(r.BytesSuccess), r.Duration())
+			status, r.TaskName, r.FilesSuccess, syncpkg.FormatBytes(r.BytesSuccess), r.Duration())
 	}
 
 	fmt.Println("========================================")
 
 	// Print detailed results for each task
 	for _, r := range results {
-		sync.PrintResult(r)
+		syncpkg.PrintResult(r)
 	}
 
 	if !allSuccess {
@@ -153,4 +145,67 @@ func runSync(cmd *cobra.Command, args []string, dryRun bool) error {
 	}
 
 	return nil
+}
+
+// executeTaskWithState executes a task and records its state
+func executeTaskWithState(ctx context.Context, executor *syncpkg.Executor, stateStore *state.Store, log *logger.Logger, task config.TaskConfig, dryRun bool) *syncpkg.Result {
+	// Start execution recording
+	execID, err := stateStore.StartExecution(task.Name)
+	if err != nil {
+		log.Warnf("Failed to record execution start: %v", err)
+	}
+
+	// Build compression config from task
+	compressionConfig := compress.Config{
+		Enabled:           task.Compression.Enabled,
+		Type:              task.Compression.Type,
+		Level:             task.Compression.Level,
+		MinSize:           task.Compression.MinSize,
+		IncludeExtensions: task.Compression.IncludeExtensions,
+		ExcludeExtensions: task.Compression.ExcludeExtensions,
+	}
+
+	opts := syncpkg.Options{
+		DryRun:      dryRun,
+		DateFormat:  task.Target.DateFormat,
+		Compression: compressionConfig,
+	}
+
+	// Execute the task
+	result, err := executor.Execute(ctx, task, opts)
+
+	// Complete execution recording
+	if execID > 0 {
+		var status state.ExecutionStatus
+		var errorMsg string
+
+		if err != nil {
+			status = state.StatusFailed
+			errorMsg = err.Error()
+		} else if result.Success {
+			status = state.StatusSuccess
+		} else {
+			status = state.StatusFailed
+			if len(result.FailedFiles) > 0 {
+				errorMsg = fmt.Sprintf("%d files failed", len(result.FailedFiles))
+			}
+		}
+
+		recordErr := stateStore.CompleteExecution(
+			execID,
+			status,
+			result.FilesTotal,
+			result.FilesSuccess,
+			result.FilesFailed,
+			result.FilesSkipped,
+			result.BytesTotal,
+			result.BytesSuccess,
+			errorMsg,
+		)
+		if recordErr != nil {
+			log.Warnf("Failed to record execution completion: %v", recordErr)
+		}
+	}
+
+	return result
 }

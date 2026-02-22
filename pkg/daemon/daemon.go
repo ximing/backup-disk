@@ -16,6 +16,7 @@ import (
 	"github.com/ximing/cloudsync/pkg/config"
 	"github.com/ximing/cloudsync/pkg/logger"
 	"github.com/ximing/cloudsync/pkg/scheduler"
+	"github.com/ximing/cloudsync/pkg/state"
 	"github.com/ximing/cloudsync/pkg/storage"
 	syncpkg "github.com/ximing/cloudsync/pkg/sync"
 )
@@ -30,6 +31,7 @@ type Daemon struct {
 	scheduler  *scheduler.TaskScheduler
 	storage    storage.Storage
 	logger     *logger.Logger
+	stateStore *state.Store
 	pidFile    string
 	dataDir    string
 	mu         gosync.RWMutex
@@ -71,10 +73,17 @@ func New(cfg *config.Config, log *logger.Logger, dataDir string) (*Daemon, error
 
 	pidFile := filepath.Join(dataDir, pidFileName)
 
+	// Initialize state store
+	stateStore, err := state.New(state.GetDBPath())
+	if err != nil {
+		return nil, fmt.Errorf("failed to open state database: %w", err)
+	}
+
 	d := &Daemon{
 		cfg:        cfg,
 		storage:    store,
 		logger:     log,
+		stateStore: stateStore,
 		pidFile:    pidFile,
 		dataDir:    dataDir,
 		stopChan:   make(chan struct{}),
@@ -268,6 +277,17 @@ func (d *Daemon) handleTask(ctx context.Context, task scheduler.TaskConfig) erro
 		return fmt.Errorf("task config not found: %s", task.Name)
 	}
 
+	// Record execution start
+	var execID int64
+	if d.stateStore != nil {
+		id, err := d.stateStore.StartExecution(task.Name)
+		if err != nil {
+			d.logger.Warnf("Failed to record execution start: %v", err)
+		} else {
+			execID = id
+		}
+	}
+
 	// Build compression config
 	compressionConfig := compress.Config{
 		Enabled:           task.Compression.Enabled,
@@ -287,6 +307,40 @@ func (d *Daemon) handleTask(ctx context.Context, task scheduler.TaskConfig) erro
 	}
 
 	result, err := executor.Execute(ctx, *taskCfg, opts)
+
+	// Record execution completion
+	if execID > 0 && d.stateStore != nil {
+		var status state.ExecutionStatus
+		var errorMsg string
+
+		if err != nil {
+			status = state.StatusFailed
+			errorMsg = err.Error()
+		} else if result.Success {
+			status = state.StatusSuccess
+		} else {
+			status = state.StatusFailed
+			if len(result.FailedFiles) > 0 {
+				errorMsg = fmt.Sprintf("%d files failed", len(result.FailedFiles))
+			}
+		}
+
+		recordErr := d.stateStore.CompleteExecution(
+			execID,
+			status,
+			result.FilesTotal,
+			result.FilesSuccess,
+			result.FilesFailed,
+			result.FilesSkipped,
+			result.BytesTotal,
+			result.BytesSuccess,
+			errorMsg,
+		)
+		if recordErr != nil {
+			d.logger.Warnf("Failed to record execution completion: %v", recordErr)
+		}
+	}
+
 	if err != nil {
 		d.logger.TaskError(task.Name, fmt.Sprintf("Task execution failed: %v", err))
 		return err
@@ -335,9 +389,18 @@ func (d *Daemon) reload() {
 		return
 	}
 
-	// Update configuration
+	// Update configuration and storage
 	d.mu.Lock()
 	d.cfg = cfg
+
+	// Create new storage backend with new config
+	newStorage, err := storage.NewStorage(cfg)
+	if err != nil {
+		d.mu.Unlock()
+		d.logger.Errorf("Failed to create new storage: %v", err)
+		return
+	}
+	d.storage = newStorage
 	d.mu.Unlock()
 
 	// Restart scheduler with new tasks
@@ -367,6 +430,11 @@ func (d *Daemon) shutdown() {
 
 	// Wait for any ongoing tasks
 	d.wg.Wait()
+
+	// Close state store
+	if d.stateStore != nil {
+		d.stateStore.Close()
+	}
 
 	// Remove PID file
 	os.Remove(d.pidFile)

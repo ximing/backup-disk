@@ -157,7 +157,7 @@
         "Typecheck passes: go build 成功"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "可观测性功能，独立模块但依赖守护进程写入状态。"
     },
     {

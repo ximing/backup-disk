@@ -5,6 +5,9 @@
 - Logger package in pkg/logger/ provides structured logging with task-specific outputs
 - Environment variables in config are expanded using os.ExpandEnv()
 - Config directory: ~/.cloudsync/, logs: ~/.cloudsync/logs/, data: ~/.cloudsync/data/
+- State database: ~/.cloudsync/data/state.db using SQLite via modernc.org/sqlite
+- Log rotation uses 100MB limit with 5 backup files by default
+- State tracking is done via pkg/state with StartExecution/CompleteExecution pattern
 
 ## 2024-02-22T23:15:00+08:00 - US-001
 - Implemented Go project structure with cmd/, pkg/config/, pkg/logger/, internal/ directories
@@ -182,4 +185,36 @@
   - Date format in target path follows Go time layout (default: 2006/01/02/150405)
   - Upload flow: open file → compress if needed → upload to {prefix}/{date}/{filename}
   - Next step: US-008 (daemon mode) depends on scheduler and sync modules
+
+## 2026-02-23T02:00:00+08:00 - US-009
+- Implemented SQLite-based state database in pkg/state for task execution persistence
+- Created ExecutionRecord and TaskStatus structs for tracking task runs
+- Implemented log rotation with 100MB limit using RotatingWriter in pkg/logger/rotator.go
+- Added task-specific log file support: ~/.cloudsync/logs/tasks/{task-name}.log
+- Implemented `cloudsync status` command showing daemon status and all task states
+- Implemented `cloudsync logs [task-name]` command with --follow and --lines flags
+- Implemented `cloudsync history [task-name]` command showing execution records from SQLite
+- Integrated state tracking in both manual sync and daemon task execution
+- State database location: ~/.cloudsync/data/state.db
+- Files changed:
+  - go.mod (added modernc.org/sqlite v1.46.1 dependency)
+  - go.sum (updated with new checksums)
+  - pkg/state/state.go (new file with SQLite state persistence)
+  - pkg/logger/rotator.go (new file with log rotation and task log manager)
+  - pkg/logger/logger.go (updated with rotating logger and task log support)
+  - cmd/cloudsync/status.go (new file with status command)
+  - cmd/cloudsync/logs.go (new file with logs command)
+  - cmd/cloudsync/history.go (new file with history command)
+  - cmd/cloudsync/root.go (added status, logs, history subcommands)
+  - cmd/cloudsync/sync.go (updated with state tracking and rotating logger)
+  - pkg/daemon/daemon.go (updated with state tracking in task execution)
+  - prd.json (marked US-009 as complete)
+- **Learnings for future iterations:**
+  - Use modernc.org/sqlite for pure Go SQLite implementation (no CGO)
+  - State database schema uses DATETIME fields with ISO8601 format for time storage
+  - RotatingWriter uses a ring buffer approach to track file sizes for rotation
+  - TaskLogManager handles lazy initialization of task-specific log files
+  - Execution records store both start and end times for duration calculation
+  - State tracking is integrated in both manual sync and daemon task execution paths
+  - Next step: US-010 (cleanup command) depends on retention module
 ---
