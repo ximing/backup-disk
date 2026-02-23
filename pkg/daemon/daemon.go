@@ -97,6 +97,31 @@ func New(cfg *config.Config, log *logger.Logger, dataDir string) (*Daemon, error
 	return d, nil
 }
 
+// reinitializeLogger reinitializes the logger for the child process after daemonize
+func (d *Daemon) reinitializeLogger() error {
+	if d.cfg == nil {
+		return nil
+	}
+
+	logDir := filepath.Join(d.dataDir, "logs")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return fmt.Errorf("failed to create log directory: %w", err)
+	}
+
+	logFile := filepath.Join(logDir, "daemon.log")
+	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open log file: %w", err)
+	}
+
+	logLevel := logger.ParseLevel(d.cfg.Global.LogLevel)
+	newLogger := logger.New(logLevel, d.cfg.Global.LogFormat, f)
+	d.logger = newLogger
+	logger.SetGlobalLogger(newLogger)
+
+	return nil
+}
+
 // Start starts the daemon
 func (d *Daemon) Start(foreground bool) error {
 	// Check if already running
@@ -112,6 +137,10 @@ func (d *Daemon) Start(foreground bool) error {
 	if !foreground {
 		if err := d.daemonize(); err != nil {
 			return fmt.Errorf("failed to daemonize: %w", err)
+		}
+		// Reinitialize logger in child process (file handle was closed by parent)
+		if err := d.reinitializeLogger(); err != nil {
+			return fmt.Errorf("failed to reinitialize logger: %w", err)
 		}
 	}
 
