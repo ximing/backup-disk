@@ -13,6 +13,9 @@ import (
 
 // daemonizeImpl implements daemonization for Linux
 func (d *Daemon) daemonizeImpl() error {
+	// Check if we're in the parent or child process by looking for the error file env var
+	errFilePath := os.Getenv("CLOUDSYNC_STARTUP_ERR_FILE")
+
 	// Get executable path (must use absolute path for ForkExec)
 	// Try /proc/self/exe first (most reliable on Linux), fallback to os.Executable()
 	execPath, err := os.Readlink("/proc/self/exe")
@@ -28,9 +31,11 @@ func (d *Daemon) daemonizeImpl() error {
 		return fmt.Errorf("executable not found at %s: %w", execPath, err)
 	}
 
-	// Get error file path from environment (set by parent)
-	errFilePath := os.Getenv("CLOUDSYNC_STARTUP_ERR_FILE")
-	pidFilePath := d.pidFile
+	// Create a pipe for parent-child synchronization
+	var pipe [2]int
+	if err := unix.Pipe(pipe[:]); err != nil {
+		return fmt.Errorf("failed to create pipe: %w", err)
+	}
 
 	// Use syscall.ForkExec for proper daemonization
 	sysProcAttr := &syscall.SysProcAttr{
@@ -40,54 +45,79 @@ func (d *Daemon) daemonizeImpl() error {
 	procAttr := &syscall.ProcAttr{
 		Dir:   "/",
 		Env:   os.Environ(),
-		Files: []uintptr{0, 1, 2},
+		Files: []uintptr{0, 1, 2, uintptr(pipe[1])}, // Include write end of pipe
 		Sys:   sysProcAttr,
 	}
+
+	// Pass pipe FD to child via environment
+	os.Setenv("CLOUDSYNC_PIPE_FD", fmt.Sprintf("%d", pipe[1]))
 
 	// Fork and exec
 	pid, err := syscall.ForkExec(execPath, os.Args, procAttr)
 	if err != nil {
+		unix.Close(pipe[0])
+		unix.Close(pipe[1])
 		return fmt.Errorf("fork failed: %w", err)
 	}
 
+	// Close write end in parent
+	unix.Close(pipe[1])
+
 	if pid > 0 {
-		// Parent process - wait for child to start successfully
-		// Child should write PID file on success or error file on failure
-		maxWait := 10 // seconds
-		for i := 0; i < maxWait*10; i++ {
-			time.Sleep(100 * time.Millisecond)
+		// Parent process - wait for child to signal success or failure
+		// Child will write a byte to the pipe when ready, or close it on error
+		buf := make([]byte, 1)
 
-			// Check if error file was written
-			if errFilePath != "" {
-				if errMsg := readStartupError(errFilePath); errMsg != "" {
-					return fmt.Errorf("daemon failed to start: %s", errMsg)
-				}
-			}
+		// Set a read timeout
+		done := make(chan struct{})
+		var readErr error
+		var n int
 
-			// Check if PID file was written with child's PID
-			if pidData, err := os.ReadFile(pidFilePath); err == nil {
-				var childPID int
-				if _, err := fmt.Sscanf(string(pidData), "%d", &childPID); err == nil {
-					if childPID == pid {
-						// Success! Child started and wrote its PID
-						fmt.Printf("Daemon started successfully (PID: %d)\n", pid)
-						return nil
+		go func() {
+			n, readErr = unix.Read(pipe[0], buf)
+			close(done)
+		}()
+
+		// Wait for either the read to complete or timeout
+		select {
+		case <-done:
+			unix.Close(pipe[0])
+
+			if readErr != nil || n == 0 {
+				// Child closed pipe without writing = error occurred
+				// Check error file for details
+				if errFilePath != "" {
+					if errMsg := readStartupError(errFilePath); errMsg != "" {
+						return fmt.Errorf("daemon failed to start: %s", errMsg)
 					}
 				}
-			}
-
-			// Check if child is still running
-			if !isProcessRunning(pid) {
-				// Child exited without writing error or PID
 				return fmt.Errorf("daemon process exited unexpectedly")
 			}
-		}
 
-		// Timeout waiting for child
-		return fmt.Errorf("timeout waiting for daemon to start")
+			// Child wrote a byte = success
+			fmt.Printf("Daemon started successfully (PID: %d)\n", pid)
+			return nil
+
+		case <-time.After(10 * time.Second):
+			unix.Close(pipe[0])
+			// Kill the child process
+			unix.Kill(pid, unix.SIGTERM)
+			return fmt.Errorf("timeout waiting for daemon to start")
+		}
 	}
 
 	// Child process continues as daemon
+	// Close read end in child
+	unix.Close(pipe[0])
+
+	// Get the write end of the pipe
+	pipeFD := pipe[1]
+	if envFD := os.Getenv("CLOUDSYNC_PIPE_FD"); envFD != "" {
+		fmt.Sscanf(envFD, "%d", &pipeFD)
+	}
+
+	// Store the pipe FD for later signaling
+	d.pipeFD = pipeFD
 
 	// Change working directory to root
 	if err := os.Chdir("/"); err != nil {
