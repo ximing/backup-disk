@@ -162,7 +162,6 @@ sudo journalctl -u cloudsync -f
         <string>/usr/local/bin/cloudsync</string>
         <string>daemon</string>
         <string>start</string>
-        <string>--foreground</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -340,7 +339,7 @@ cloudsync daemon status
 cloudsync daemon reload
 ```
 
-注意：守护进程默认在前台运行，使用 `--foreground` 标志（默认为 true）用于兼容性。生产环境建议使用 systemd 或 launchd 管理。
+注意：守护进程在前台运行，建议使用 systemd 或 launchd 等进程管理器来管理后台运行。
 
 #### status 命令
 
