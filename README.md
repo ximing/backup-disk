@@ -104,18 +104,83 @@ cloudsync sync my-backup --dry-run
 
 ### 启动守护进程
 
+CloudSync 守护进程默认在前台运行，建议使用 systemd (Linux)、launchd (macOS) 或其他进程管理器来管理后台运行。
+
 ```bash
-# 启动守护进程
+# 前台启动守护进程（默认）
 cloudsync daemon start
 
 # 查看状态
 cloudsync daemon status
 
-# 前台运行（调试用）
-cloudsync daemon start --foreground
-
 # 停止守护进程
 cloudsync daemon stop
+```
+
+#### 使用 systemd 管理守护进程（Linux）
+
+1. 复制 service 文件到 systemd 目录：
+
+```bash
+sudo cp scripts/cloudsync.service /etc/systemd/system/
+```
+
+2. 编辑 service 文件，修改用户和路径配置：
+
+```bash
+sudo vim /etc/systemd/system/cloudsync.service
+```
+
+3. 重载 systemd 配置并启动服务：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable cloudsync
+sudo systemctl start cloudsync
+```
+
+4. 查看服务状态：
+
+```bash
+sudo systemctl status cloudsync
+sudo journalctl -u cloudsync -f
+```
+
+#### 使用 launchd 管理守护进程（macOS）
+
+创建 `~/Library/LaunchAgents/com.cloudsync.daemon.plist`：
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cloudsync.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/cloudsync</string>
+        <string>daemon</string>
+        <string>start</string>
+        <string>--foreground</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/YOUR_USERNAME/.cloudsync/logs/daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOUR_USERNAME/.cloudsync/logs/daemon.error.log</string>
+</dict>
+</plist>
+```
+
+加载并启动服务：
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.cloudsync.daemon.plist
+launchctl start com.cloudsync.daemon
 ```
 
 ## 配置文件
@@ -262,13 +327,10 @@ cloudsync cleanup my-backup --force
 #### daemon 命令
 
 ```bash
-# 后台启动守护进程
+# 前台启动守护进程（默认，建议使用进程管理器）
 cloudsync daemon start
 
-# 前台运行（调试用）
-cloudsync daemon start --foreground
-
-# 停止守护进程
+# 停止守护进程（通过 PID 文件）
 cloudsync daemon stop
 
 # 查看守护进程状态
@@ -277,6 +339,8 @@ cloudsync daemon status
 # 重载配置（发送 SIGHUP）
 cloudsync daemon reload
 ```
+
+注意：守护进程默认在前台运行，使用 `--foreground` 标志（默认为 true）用于兼容性。生产环境建议使用 systemd 或 launchd 管理。
 
 #### status 命令
 

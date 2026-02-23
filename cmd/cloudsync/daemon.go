@@ -37,18 +37,26 @@ func NewDaemonStartCommand() *cobra.Command {
 		Short: "启动守护进程",
 		Long: `启动 CloudSync 守护进程，按计划自动执行备份任务。
 
+默认在前台运行，建议使用 systemd 或其他进程管理器来管理守护进程。
+
 示例:
-  # 后台启动守护进程
+  # 前台启动守护进程（默认）
   cloudsync daemon start
 
-  # 前台运行模式（用于调试）
-  cloudsync daemon start --foreground`,
+  # 前台运行模式（用于调试，与默认行为相同）
+  cloudsync daemon start --foreground
+
+  # 使用 systemd 管理守护进程（推荐用于 Linux）
+  # 1. 复制 scripts/cloudsync.service 到 /etc/systemd/system/
+  # 2. sudo systemctl daemon-reload
+  # 3. sudo systemctl enable cloudsync
+  # 4. sudo systemctl start cloudsync`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDaemonStart(foreground)
 		},
 	}
 
-	cmd.Flags().BoolVar(&foreground, "foreground", false, "前台运行模式，不脱离终端")
+	cmd.Flags().BoolVar(&foreground, "foreground", true, "前台运行模式（默认开启，保留用于兼容性）")
 
 	return cmd
 }
@@ -94,25 +102,9 @@ func runDaemonStart(foreground bool) error {
 		return fmt.Errorf("invalid config: %w", err)
 	}
 
-	// Initialize logger
+	// Initialize logger - always log to stdout in foreground mode
 	logLevel := logger.ParseLevel(cfg.Global.LogLevel)
-	var logOutput *os.File
-	if foreground {
-		logOutput = os.Stdout
-	} else {
-		// Log to file when running as daemon
-		logDir := config.GetLogDir()
-		if err := os.MkdirAll(logDir, 0755); err != nil {
-			return fmt.Errorf("failed to create log directory: %w", err)
-		}
-		logFile := fmt.Sprintf("%s/daemon.log", logDir)
-		var err error
-		logOutput, err = os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return fmt.Errorf("failed to open log file: %w", err)
-		}
-		defer logOutput.Close()
-	}
+	logOutput := os.Stdout
 
 	log := logger.New(logLevel, cfg.Global.LogFormat, logOutput)
 	logger.SetGlobalLogger(log)
@@ -129,12 +121,14 @@ func runDaemonStart(foreground bool) error {
 		return fmt.Errorf("failed to create daemon: %w", err)
 	}
 
-	if foreground {
-		fmt.Println("Starting daemon in foreground mode...")
-		fmt.Println("Press Ctrl+C to stop")
-	}
+	fmt.Println("Starting daemon in foreground mode...")
+	fmt.Println("Press Ctrl+C to stop")
+	fmt.Println()
+	fmt.Println("Tip: Use systemd or another process manager to run the daemon in background.")
+	fmt.Println("     See scripts/cloudsync.service for an example systemd service file.")
+	fmt.Println()
 
-	return d.Start(foreground)
+	return d.Start(true)
 }
 
 func runDaemonStop() error {

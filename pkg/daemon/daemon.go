@@ -40,7 +40,6 @@ type Daemon struct {
 	stopChan   chan struct{}
 	reloadChan chan struct{}
 	wg         gosync.WaitGroup
-	pipeFD     int // Pipe file descriptor for signaling parent (child only)
 }
 
 // Status represents the daemon status
@@ -98,50 +97,6 @@ func New(cfg *config.Config, log *logger.Logger, dataDir string) (*Daemon, error
 	return d, nil
 }
 
-// writeStartupError writes error to temp file for parent to read
-func (d *Daemon) writeStartupError(msg string) {
-	if errFile := os.Getenv("CLOUDSYNC_STARTUP_ERR_FILE"); errFile != "" {
-		os.WriteFile(errFile, []byte(msg), 0644)
-	}
-}
-
-// readStartupError reads startup error from temp file
-func readStartupError(errFilePath string) string {
-	if errFilePath == "" {
-		return ""
-	}
-	data, err := os.ReadFile(errFilePath)
-	if err != nil {
-		return ""
-	}
-	return string(data)
-}
-
-// reinitializeLogger reinitializes the logger for the child process after daemonize
-func (d *Daemon) reinitializeLogger() error {
-	if d.cfg == nil {
-		return nil
-	}
-
-	logDir := filepath.Join(d.dataDir, "logs")
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return fmt.Errorf("failed to create log directory: %w", err)
-	}
-
-	logFile := filepath.Join(logDir, "daemon.log")
-	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open log file: %w", err)
-	}
-
-	logLevel := logger.ParseLevel(d.cfg.Global.LogLevel)
-	newLogger := logger.New(logLevel, d.cfg.Global.LogFormat, f)
-	d.logger = newLogger
-	logger.SetGlobalLogger(newLogger)
-
-	return nil
-}
-
 // Start starts the daemon
 func (d *Daemon) Start(foreground bool) error {
 	// Check if already running
@@ -153,52 +108,8 @@ func (d *Daemon) Start(foreground bool) error {
 		os.Remove(d.pidFile)
 	}
 
-	// If not foreground mode, daemonize
-	if !foreground {
-		// Create a temp error file to capture startup errors from child process
-		errFile, err := os.CreateTemp("", "cloudsync-startup-*.err")
-		if err != nil {
-			return fmt.Errorf("failed to create temp error file: %w", err)
-		}
-		errFilePath := errFile.Name()
-		errFile.Close()
-		defer os.Remove(errFilePath)
-
-		// Pass error file path to child via environment
-		os.Setenv("CLOUDSYNC_STARTUP_ERR_FILE", errFilePath)
-
-		if err := d.daemonize(); err != nil {
-			return fmt.Errorf("failed to daemonize: %w", err)
-		}
-
-		// In child process: reinitialize logger and capture startup errors
-		if err := d.reinitializeLogger(); err != nil {
-			// Write error to temp file so parent can read it
-			os.WriteFile(errFilePath, []byte(err.Error()), 0644)
-			return fmt.Errorf("failed to reinitialize logger: %w", err)
-		}
-
-			// Clear the env var in child
-		os.Unsetenv("CLOUDSYNC_STARTUP_ERR_FILE")
-
-		// In child process: defer to catch any startup errors
-		var startupErr error
-		defer func() {
-			if startupErr != nil {
-				os.WriteFile(errFilePath, []byte(startupErr.Error()), 0644)
-			}
-			if r := recover(); r != nil {
-				os.WriteFile(errFilePath, []byte(fmt.Sprintf("panic: %v", r)), 0644)
-				panic(r)
-			}
-		}()
-	}
-
 	// Write PID file
 	if err := d.writePIDFile(); err != nil {
-		if !foreground {
-			d.writeStartupError(err.Error())
-		}
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 
@@ -206,9 +117,6 @@ func (d *Daemon) Start(foreground bool) error {
 	ctx := context.Background()
 	for i, s := range d.storages {
 		if err := s.Validate(ctx); err != nil {
-			if !foreground {
-				d.writeStartupError(fmt.Sprintf("storage %d validation failed: %v", i, err))
-			}
 			return fmt.Errorf("storage %d validation failed: %w", i, err)
 		}
 	}
@@ -219,9 +127,6 @@ func (d *Daemon) Start(foreground bool) error {
 
 	// Register all tasks
 	if err := d.registerTasks(); err != nil {
-		if !foreground {
-			d.writeStartupError(fmt.Sprintf("failed to register tasks: %v", err))
-		}
 		return fmt.Errorf("failed to register tasks: %w", err)
 	}
 
@@ -231,11 +136,6 @@ func (d *Daemon) Start(foreground bool) error {
 
 	// Start scheduler
 	d.scheduler.Start()
-
-	// Signal parent that startup was successful
-	if d.pipeFD > 0 {
-		d.signalParentSuccess()
-	}
 
 	// Setup signal handling
 	d.setupSignalHandling()
@@ -635,12 +535,6 @@ func isProcessRunning(pid int) bool {
 	// Use platform-specific signal check
 	err := signalProcessCheck(pid)
 	return err == nil
-}
-
-// daemonize forks the process to run as a daemon
-// Platform-specific implementation is in daemon_*.go files
-func (d *Daemon) daemonize() error {
-	return d.daemonizeImpl()
 }
 
 // printNextRuns prints the next scheduled run times for all tasks

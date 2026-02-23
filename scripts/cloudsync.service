@@ -1,0 +1,31 @@
+[Unit]
+Description=CloudSync Backup Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cloudsync daemon start --foreground
+Restart=always
+RestartSec=5
+
+# Run as a specific user (change to your backup user)
+User=backup
+Group=backup
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/backup/.cloudsync
+
+# Environment
+Environment="HOME=/home/backup"
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cloudsync
+
+[Install]
+WantedBy=multi-user.target
