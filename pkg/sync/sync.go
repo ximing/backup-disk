@@ -148,15 +148,6 @@ func (e *Executor) Execute(ctx context.Context, task config.TaskConfig, opts Opt
 	fileCount, totalSize := scanner.CountFiles(files)
 	e.logger.TaskInfo(task.Name, fmt.Sprintf("Found %d files, total size: %s", fileCount, FormatBytes(totalSize)))
 
-	// Create compressor
-	compressor, err := compress.NewCompressor(opts.Compression)
-	if err != nil {
-		result.Success = false
-		result.Error = err
-		result.EndTime = time.Now()
-		return result, err
-	}
-
 	// Generate target prefix with date
 	dateStr := time.Now().Format(getDateFormat(task.Target.DateFormat))
 	targetPrefix := filepath.Join(task.Target.Prefix, dateStr)
@@ -168,8 +159,127 @@ func (e *Executor) Execute(ctx context.Context, task config.TaskConfig, opts Opt
 		e.logger.TaskInfo(task.Name, "DRY RUN MODE - No files will be uploaded")
 	}
 
-	// Process files
+	// Process files based on compression mode
 	stats := &Stats{}
+
+	if opts.Compression.Enabled && opts.Compression.Mode == compress.ModeArchive {
+		// Archive mode: pack all files into a single compressed archive
+		err := e.executeArchiveMode(ctx, task, files, targetPrefix, opts, stats)
+		if err != nil {
+			result.Success = false
+			result.Error = err
+			result.EndTime = time.Now()
+			return result, err
+		}
+	} else {
+		// File mode: upload files individually (possibly compressed)
+		err := e.executeFileMode(ctx, task, files, targetPrefix, opts, stats)
+		if err != nil {
+			result.Success = false
+			result.Error = err
+			result.EndTime = time.Now()
+			return result, err
+		}
+	}
+
+	// Populate result
+	result.EndTime = time.Now()
+
+	// Populate result
+	result.EndTime = time.Now()
+	result.Success = atomic.LoadInt32(&stats.filesFailed) == 0
+	result.FilesTotal = int(atomic.LoadInt32(&stats.filesTotal))
+	result.FilesSuccess = int(atomic.LoadInt32(&stats.filesSuccess))
+	result.FilesFailed = int(atomic.LoadInt32(&stats.filesFailed))
+	result.BytesTotal = atomic.LoadInt64(&stats.bytesTotal)
+	result.BytesSuccess = atomic.LoadInt64(&stats.bytesSuccess)
+	result.FailedFiles = stats.GetFailedFiles()
+
+	if result.Success {
+		e.logger.TaskInfo(task.Name, fmt.Sprintf("Sync completed successfully: %d files, %s in %v",
+			result.FilesSuccess, FormatBytes(result.BytesSuccess), result.Duration()))
+	} else {
+		e.logger.TaskWarn(task.Name, fmt.Sprintf("Sync completed with errors: %d failed, %d succeeded",
+			result.FilesFailed, result.FilesSuccess))
+	}
+
+	return result, nil
+}
+
+// executeArchiveMode packs all files into a compressed archive and uploads it
+func (e *Executor) executeArchiveMode(ctx context.Context, task config.TaskConfig, files []scanner.FileInfo, targetPrefix string, opts Options, stats *Stats) error {
+	if len(files) == 0 {
+		e.logger.TaskInfo(task.Name, "No files to archive")
+		return nil
+	}
+
+	e.logger.TaskInfo(task.Name, fmt.Sprintf("Creating %s archive with %d files...", opts.Compression.Type, len(files)))
+
+	// Create archive compressor
+	archiveCompressor := compress.NewArchiveCompressor(opts.Compression)
+
+	// Create the archive
+	archivePath, archiveSize, err := archiveCompressor.CreateArchive(files, task.Source.Path, task.Name)
+	if err != nil {
+		return fmt.Errorf("failed to create archive: %w", err)
+	}
+	defer archiveCompressor.Cleanup(archivePath)
+
+	e.logger.TaskInfo(task.Name, fmt.Sprintf("Archive created: %s (%s)", archivePath, FormatBytes(archiveSize)))
+
+	// Build remote path for archive
+	archiveExt := archiveCompressor.GetArchiveExtension()
+	archiveName := opts.Compression.ArchiveName
+	if archiveName == "" {
+		archiveName = fmt.Sprintf("%s_%s", task.Name, time.Now().Format("20060102_150405"))
+	}
+	remotePath := filepath.Join(targetPrefix, archiveName+archiveExt)
+	remotePath = filepath.ToSlash(remotePath)
+
+	e.logger.TaskInfo(task.Name, fmt.Sprintf("Uploading archive to: %s", remotePath))
+
+	// Upload the archive with retry
+	retryConfig := retry.Config{
+		MaxRetries: opts.MaxRetries,
+		BaseDelay:  1 * time.Second,
+		Multiplier: 2,
+	}
+	if retryConfig.MaxRetries <= 0 {
+		retryConfig.MaxRetries = 3
+	}
+
+	err = retry.Retry(ctx, retryConfig, retry.IsRecoverableError, func() error {
+		return e.storage.Upload(ctx, archivePath, remotePath)
+	})
+
+	if err != nil {
+		// Record all files as failed
+		for _, f := range files {
+			stats.IncrementFilesFailed(f.RelativePath)
+		}
+		return fmt.Errorf("failed to upload archive: %w", err)
+	}
+
+	// Record success for all files
+	for _, f := range files {
+		stats.IncrementFilesTotal()
+		stats.AddBytesTotal(f.Size)
+		stats.IncrementFilesSuccess()
+		stats.AddBytesSuccess(f.Size)
+	}
+
+	e.logger.TaskInfo(task.Name, fmt.Sprintf("Archive uploaded successfully: %s (%s)", remotePath, FormatBytes(archiveSize)))
+	return nil
+}
+
+// executeFileMode uploads files individually with optional per-file compression
+func (e *Executor) executeFileMode(ctx context.Context, task config.TaskConfig, files []scanner.FileInfo, targetPrefix string, opts Options, stats *Stats) error {
+	// Create compressor
+	compressor, err := compress.NewCompressor(opts.Compression)
+	if err != nil {
+		return err
+	}
+
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, 5) // Limit concurrent uploads
 
@@ -201,26 +311,7 @@ func (e *Executor) Execute(ctx context.Context, task config.TaskConfig, opts Opt
 	}
 
 	wg.Wait()
-
-	// Populate result
-	result.EndTime = time.Now()
-	result.Success = atomic.LoadInt32(&stats.filesFailed) == 0
-	result.FilesTotal = int(atomic.LoadInt32(&stats.filesTotal))
-	result.FilesSuccess = int(atomic.LoadInt32(&stats.filesSuccess))
-	result.FilesFailed = int(atomic.LoadInt32(&stats.filesFailed))
-	result.BytesTotal = atomic.LoadInt64(&stats.bytesTotal)
-	result.BytesSuccess = atomic.LoadInt64(&stats.bytesSuccess)
-	result.FailedFiles = stats.GetFailedFiles()
-
-	if result.Success {
-		e.logger.TaskInfo(task.Name, fmt.Sprintf("Sync completed successfully: %d files, %s in %v",
-			result.FilesSuccess, FormatBytes(result.BytesSuccess), result.Duration()))
-	} else {
-		e.logger.TaskWarn(task.Name, fmt.Sprintf("Sync completed with errors: %d failed, %d succeeded",
-			result.FilesFailed, result.FilesSuccess))
-	}
-
-	return result, nil
+	return nil
 }
 
 // uploadFile uploads a single file with retry logic
@@ -302,11 +393,29 @@ func (e *Executor) doUpload(ctx context.Context, file scanner.FileInfo, remotePa
 }
 
 // getDateFormat returns the date format string, using default if empty
+// Supports both Go time layout (2006/01/02/150405) and standard placeholders (YYYY/MM/DD/HHmmss)
 func getDateFormat(format string) string {
 	if format == "" {
 		return "2006/01/02/150405"
 	}
-	return format
+
+	// Convert standard date placeholders to Go time layout
+	replacements := map[string]string{
+		"YYYY": "2006",
+		"YY":   "06",
+		"MM":   "01",
+		"DD":   "02",
+		"HH":   "15",
+		"mm":   "04",
+		"ss":   "05",
+	}
+
+	result := format
+	for old, new := range replacements {
+		result = strings.ReplaceAll(result, old, new)
+	}
+
+	return result
 }
 
 // FormatBytes formats bytes to human-readable string

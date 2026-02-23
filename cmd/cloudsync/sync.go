@@ -160,10 +160,12 @@ func executeTaskWithState(ctx context.Context, executor *syncpkg.Executor, state
 	compressionConfig := compress.Config{
 		Enabled:           task.Compression.Enabled,
 		Type:              task.Compression.Type,
+		Mode:              compress.Mode(task.Compression.Mode),
 		Level:             task.Compression.Level,
 		MinSize:           task.Compression.MinSize,
 		IncludeExtensions: task.Compression.IncludeExtensions,
 		ExcludeExtensions: task.Compression.ExcludeExtensions,
+		ArchiveName:       task.Compression.ArchiveName,
 	}
 
 	opts := syncpkg.Options{

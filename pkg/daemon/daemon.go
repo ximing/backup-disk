@@ -233,10 +233,12 @@ func (d *Daemon) registerTasks() error {
 			Compression: scheduler.CompressionConfig{
 				Enabled:           taskCfg.Compression.Enabled,
 				Type:              taskCfg.Compression.Type,
+				Mode:              taskCfg.Compression.Mode,
 				Level:             taskCfg.Compression.Level,
 				MinSize:           taskCfg.Compression.MinSize,
 				IncludeExtensions: taskCfg.Compression.IncludeExtensions,
 				ExcludeExtensions: taskCfg.Compression.ExcludeExtensions,
+				ArchiveName:       taskCfg.Compression.ArchiveName,
 			},
 		}
 
@@ -293,10 +295,12 @@ func (d *Daemon) handleTask(ctx context.Context, task scheduler.TaskConfig) erro
 	compressionConfig := compress.Config{
 		Enabled:           task.Compression.Enabled,
 		Type:              task.Compression.Type,
+		Mode:              compress.Mode(task.Compression.Mode),
 		Level:             task.Compression.Level,
 		MinSize:           task.Compression.MinSize,
 		IncludeExtensions: task.Compression.IncludeExtensions,
 		ExcludeExtensions: task.Compression.ExcludeExtensions,
+		ArchiveName:       task.Compression.ArchiveName,
 	}
 
 	// Execute the sync

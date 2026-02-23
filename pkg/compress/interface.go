@@ -20,14 +20,26 @@ type Compressor interface {
 	ShouldCompress(path string, size int64) bool
 }
 
+// Mode represents compression mode
+type Mode string
+
+const (
+	// ModeFile compresses files individually
+	ModeFile Mode = "file"
+	// ModeArchive packs all files into a single archive
+	ModeArchive Mode = "archive"
+)
+
 // Config holds compression configuration
 type Config struct {
 	Enabled           bool
 	Type              string   // "gzip" or "zstd"
 	Level             int      // 1-9
-	MinSize           int64    // minimum file size in bytes
-	IncludeExtensions []string // only compress these extensions (empty = all)
-	ExcludeExtensions []string // never compress these extensions
+	Mode              Mode     // "file" or "archive"
+	MinSize           int64    // minimum file size in bytes (file mode only)
+	IncludeExtensions []string // only compress these extensions (file mode only)
+	ExcludeExtensions []string // never compress these extensions (file mode only)
+	ArchiveName       string   // archive filename without extension (archive mode only)
 }
 
 // NewCompressor creates a new compressor based on configuration

@@ -20,7 +20,7 @@ executor := sync.NewExecutor(store, log)
 
 result, err := executor.Execute(ctx, taskConfig, sync.Options{
     DryRun:      false,
-    DateFormat:  "2006/01/02/150405",
+    DateFormat:  "YYYY/MM/DD/HHmmss",
     Compression: compress.Config{...},
 })
 ```
@@ -41,9 +41,15 @@ Uploads are limited to 5 concurrent operations using a semaphore to prevent over
 
 ## Date Format
 
-The target path format follows Go's time layout conventions:
-- Default: `2006/01/02/150405` (produces paths like `prefix/2024/02/23/143022/`)
-- Custom formats can be specified per task
+The target path format supports standard date placeholders:
+- `YYYY` - Year (4 digits)     - `MM` - Month (01-12)       - `DD` - Day (01-31)
+- `YY`   - Year (2 digits)     - `HH` - Hour (00-23)        - `mm` - Minute (00-59)
+- `ss`   - Second (00-59)
+
+- Default: `YYYY/MM/DD/HHmmss` (produces paths like `prefix/2024/02/23/143022/`)
+- Examples:
+  - `YYYY-MM-DD` → `2024-03-15`
+  - `YYYYMMDD_HHmmss` → `20240315_143022`
 
 ## Dry Run Mode
 

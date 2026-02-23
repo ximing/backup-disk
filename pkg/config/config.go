@@ -78,11 +78,13 @@ type TargetConfig struct {
 // CompressionConfig represents compression settings
 type CompressionConfig struct {
 	Enabled            bool     `yaml:"enabled"`
-	Type               string   `yaml:"type"` // gzip or zstd
+	Type               string   `yaml:"type"`                // gzip or zstd
+	Mode               string   `yaml:"mode,omitempty"`      // file or archive (default: file)
 	Level              int      `yaml:"level"`
 	MinSize            int64    `yaml:"min_size,omitempty"`
 	IncludeExtensions  []string `yaml:"include_extensions,omitempty"`
 	ExcludeExtensions  []string `yaml:"exclude_extensions,omitempty"`
+	ArchiveName        string   `yaml:"archive_name,omitempty"` // Archive filename without extension (archive mode only)
 }
 
 // RetentionConfig represents global retention settings

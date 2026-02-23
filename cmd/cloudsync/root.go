@@ -27,6 +27,7 @@ func NewRootCommand() *cobra.Command {
 	// Add subcommands
 	rootCmd.AddCommand(NewInitCommand())
 	rootCmd.AddCommand(NewValidateCommand())
+	rootCmd.AddCommand(NewTestCommand())
 	rootCmd.AddCommand(NewSyncCommand())
 	rootCmd.AddCommand(NewCleanupCommand())
 	rootCmd.AddCommand(NewDaemonCommand())

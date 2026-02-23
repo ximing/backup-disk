@@ -39,10 +39,12 @@ type TargetConfig struct {
 type CompressionConfig struct {
 	Enabled           bool
 	Type              string
+	Mode              string
 	Level             int
 	MinSize           int64
 	IncludeExtensions []string
 	ExcludeExtensions []string
+	ArchiveName       string
 }
 
 // RetentionPolicy represents retention settings
