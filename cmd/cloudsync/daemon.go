@@ -146,20 +146,20 @@ func runDaemonStop() error {
 		return fmt.Errorf("daemon not running or PID file not found")
 	}
 
-	if !isProcessRunning(pid) {
+	if !daemon.IsProcessRunning(pid) {
 		os.Remove(pidFile)
 		return fmt.Errorf("daemon not running (stale PID file removed)")
 	}
 
 	// Send SIGTERM
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	if err := daemon.SendSignal(pid, syscall.SIGTERM); err != nil {
 		return fmt.Errorf("failed to stop daemon: %w", err)
 	}
 
 	// Wait for process to exit
 	for i := 0; i < 30; i++ {
 		time.Sleep(100 * time.Millisecond)
-		if !isProcessRunning(pid) {
+		if !daemon.IsProcessRunning(pid) {
 			fmt.Println("Daemon stopped successfully")
 			return nil
 		}
@@ -178,7 +178,7 @@ func runDaemonStatus() error {
 		return nil
 	}
 
-	if !isProcessRunning(pid) {
+	if !daemon.IsProcessRunning(pid) {
 		os.Remove(pidFile)
 		fmt.Println("Daemon is not running (stale PID file removed)")
 		return nil
@@ -217,16 +217,6 @@ func readPIDFile(pidFile string) (int, error) {
 		return 0, err
 	}
 	return strconv.Atoi(string(data))
-}
-
-func isProcessRunning(pid int) bool {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// On Unix, FindProcess always succeeds, need to send signal 0
-	err = process.Signal(syscall.Signal(0))
-	return err == nil
 }
 
 func getNextRuns(schedule string, n int) ([]time.Time, error) {
