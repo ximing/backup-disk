@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -17,6 +18,10 @@ func (d *Daemon) daemonizeImpl() error {
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %w", err)
 	}
+
+	// Get error file path from environment (set by parent)
+	errFilePath := os.Getenv("CLOUDSYNC_STARTUP_ERR_FILE")
+	pidFilePath := d.pidFile
 
 	// Use syscall.ForkExec for proper daemonization
 	sysProcAttr := &syscall.SysProcAttr{
@@ -37,8 +42,40 @@ func (d *Daemon) daemonizeImpl() error {
 	}
 
 	if pid > 0 {
-		// Parent process - exit
-		os.Exit(0)
+		// Parent process - wait for child to start successfully
+		// Child should write PID file on success or error file on failure
+		maxWait := 10 // seconds
+		for i := 0; i < maxWait*10; i++ {
+			time.Sleep(100 * time.Millisecond)
+
+			// Check if error file was written
+			if errFilePath != "" {
+				if errMsg := readStartupError(errFilePath); errMsg != "" {
+					return fmt.Errorf("daemon failed to start: %s", errMsg)
+				}
+			}
+
+			// Check if PID file was written with child's PID
+			if pidData, err := os.ReadFile(pidFilePath); err == nil {
+				var childPID int
+				if _, err := fmt.Sscanf(string(pidData), "%d", &childPID); err == nil {
+					if childPID == pid {
+						// Success! Child started and wrote its PID
+						fmt.Printf("Daemon started successfully (PID: %d)\n", pid)
+						os.Exit(0)
+					}
+				}
+			}
+
+			// Check if child is still running
+			if !isProcessRunning(pid) {
+				// Child exited without writing error or PID
+				return fmt.Errorf("daemon process exited unexpectedly")
+			}
+		}
+
+		// Timeout waiting for child
+		return fmt.Errorf("timeout waiting for daemon to start")
 	}
 
 	// Child process continues as daemon
