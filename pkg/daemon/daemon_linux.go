@@ -6,14 +6,28 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // daemonizeImpl implements daemonization for Linux
 func (d *Daemon) daemonizeImpl() error {
-	// Fork the process
-	pid, _, errno := syscall.Syscall(syscall.SYS_FORK, 0, 0, 0)
-	if errno != 0 {
-		return fmt.Errorf("fork failed: %v", errno)
+	// Use syscall.ForkExec for proper daemonization
+	sysProcAttr := &syscall.SysProcAttr{
+		Setsid: true,
+	}
+
+	procAttr := &syscall.ProcAttr{
+		Dir:   "/",
+		Env:   os.Environ(),
+		Files: []uintptr{0, 1, 2},
+		Sys:   sysProcAttr,
+	}
+
+	// Fork and exec
+	pid, err := syscall.ForkExec(os.Args[0], os.Args, procAttr)
+	if err != nil {
+		return fmt.Errorf("fork failed: %w", err)
 	}
 
 	if pid > 0 {
@@ -22,12 +36,6 @@ func (d *Daemon) daemonizeImpl() error {
 	}
 
 	// Child process continues as daemon
-
-	// Create new session
-	_, err := syscall.Setsid()
-	if err != nil {
-		return fmt.Errorf("setsid failed: %w", err)
-	}
 
 	// Change working directory to root
 	if err := os.Chdir("/"); err != nil {
@@ -41,9 +49,9 @@ func (d *Daemon) daemonizeImpl() error {
 	}
 	defer devNull.Close()
 
-	syscall.Dup2(int(devNull.Fd()), int(os.Stdin.Fd()))
-	syscall.Dup2(int(devNull.Fd()), int(os.Stdout.Fd()))
-	syscall.Dup2(int(devNull.Fd()), int(os.Stderr.Fd()))
+	unix.Dup2(int(devNull.Fd()), unix.Stdin)
+	unix.Dup2(int(devNull.Fd()), unix.Stdout)
+	unix.Dup2(int(devNull.Fd()), unix.Stderr)
 
 	return nil
 }

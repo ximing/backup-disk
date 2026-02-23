@@ -168,7 +168,7 @@ func (d *Daemon) Stop() error {
 	}
 
 	// Send SIGTERM to the daemon process
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	if err := sendSignal(pid, syscall.SIGTERM); err != nil {
 		return fmt.Errorf("failed to send SIGTERM to PID %d: %w", pid, err)
 	}
 
@@ -521,12 +521,8 @@ func (d *Daemon) readPIDFile() (int, error) {
 
 // isProcessRunning checks if a process with the given PID is running
 func isProcessRunning(pid int) bool {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// On Unix systems, FindProcess always succeeds, so we need to send signal 0
-	err = process.Signal(syscall.Signal(0))
+	// Use platform-specific signal check
+	err := signalProcessCheck(pid)
 	return err == nil
 }
 

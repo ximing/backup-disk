@@ -9,28 +9,11 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-linux:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            suffix: linux-amd64
-          - goos: linux
-            goarch: arm64
-            suffix: linux-arm64
-          - goos: darwin
-            goarch: amd64
-            suffix: darwin-amd64
-          - goos: darwin
-            goarch: arm64
-            suffix: darwin-arm64
-          - goos: windows
-            goarch: amd64
-            suffix: windows-amd64
-            ext: .exe
-
+        arch: [amd64, arm64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,29 +25,80 @@ jobs:
 
       - name: Build
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+          GOARCH: ${{ matrix.arch }}
         run: |
-          go build -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o cloudsync${{ matrix.ext }} ./cmd/cloudsync
+          go build -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o cloudsync ./cmd/cloudsync
 
       - name: Package
         run: |
           mkdir -p dist
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip dist/cloudsync-${{ matrix.suffix }}.zip cloudsync${{ matrix.ext }} README.md
-          else
-            tar -czf dist/cloudsync-${{ matrix.suffix }}.tar.gz cloudsync README.md
-          fi
+          tar -czf dist/cloudsync-linux-${{ matrix.arch }}.tar.gz cloudsync README.md
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cloudsync-${{ matrix.suffix }}
+          name: cloudsync-linux-${{ matrix.arch }}
+          path: dist/*
+
+  build-darwin:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build
+        env:
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          go build -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o cloudsync ./cmd/cloudsync
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          tar -czf dist/cloudsync-darwin-${{ matrix.arch }}.tar.gz cloudsync README.md
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudsync-darwin-${{ matrix.arch }}
+          path: dist/*
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build
+        run: |
+          go build -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o cloudsync.exe ./cmd/cloudsync
+
+      - name: Package
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Compress-Archive -Path cloudsync.exe,README.md -DestinationPath dist/cloudsync-windows-amd64.zip
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudsync-windows-amd64
           path: dist/*
 
   release:
-    needs: build
+    needs: [build-linux, build-darwin, build-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -93,7 +127,6 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Compute Checksums
-        id: checksums
         run: |
           cd artifacts
           for f in cloudsync-*; do
@@ -107,7 +140,43 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           name: Release ${{ github.ref_name }}
-          body_path: ${{ github.workspace }}/artifacts/checksums.txt
-          files: artifacts/cloudsync-*
+          body: |
+            ## 变更日志
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ## 安装
+
+            ### macOS (Intel)
+            ```bash
+            curl -L -o cloudsync.tar.gz https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/cloudsync-darwin-amd64.tar.gz
+            tar -xzf cloudsync.tar.gz
+            ```
+
+            ### macOS (Apple Silicon)
+            ```bash
+            curl -L -o cloudsync.tar.gz https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/cloudsync-darwin-arm64.tar.gz
+            tar -xzf cloudsync.tar.gz
+            ```
+
+            ### Linux (AMD64)
+            ```bash
+            curl -L -o cloudsync.tar.gz https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/cloudsync-linux-amd64.tar.gz
+            tar -xzf cloudsync.tar.gz
+            ```
+
+            ### Linux (ARM64)
+            ```bash
+            curl -L -o cloudsync.tar.gz https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/cloudsync-linux-arm64.tar.gz
+            tar -xzf cloudsync.tar.gz
+            ```
+
+            ### Windows (AMD64)
+            下载 `cloudsync-windows-amd64.zip` 并解压。
+
+            ## 校验和
+
+            见 checksums.txt
+          files: artifacts/*
           draft: false
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
