@@ -20,7 +20,6 @@ import (
 	"github.com/ximing/cloudsync/pkg/state"
 	"github.com/ximing/cloudsync/pkg/storage"
 	syncpkg "github.com/ximing/cloudsync/pkg/sync"
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -662,16 +661,4 @@ func (d *Daemon) IsRunning() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.running
-}
-
-// signalParentSuccess signals the parent process that startup was successful
-func (d *Daemon) signalParentSuccess() {
-	if d.pipeFD <= 0 {
-		return
-	}
-	// Write a single byte to indicate success
-	unix.Write(d.pipeFD, []byte{1})
-	// Close the pipe after signaling
-	unix.Close(d.pipeFD)
-	d.pipeFD = 0
 }

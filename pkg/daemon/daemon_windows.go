@@ -38,3 +38,8 @@ func (d *Daemon) daemonizeImpl() error {
 	os.Exit(0)
 	return nil // Never reached
 }
+
+// signalParentSuccess is a no-op on Windows
+func (d *Daemon) signalParentSuccess() {
+	// Windows uses a different daemonization approach, no pipe needed
+}

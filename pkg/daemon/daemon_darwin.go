@@ -78,3 +78,9 @@ func (d *Daemon) reexecDaemon() error {
 	os.Exit(0)
 	return nil // Never reached
 }
+
+// signalParentSuccess is a no-op on Darwin
+// The Darwin implementation uses simple fork/exec without pipe synchronization
+func (d *Daemon) signalParentSuccess() {
+	// Not implemented on Darwin
+}

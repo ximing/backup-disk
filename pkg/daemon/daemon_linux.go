@@ -137,3 +137,15 @@ func (d *Daemon) daemonizeImpl() error {
 
 	return nil
 }
+
+// signalParentSuccess signals the parent process that startup was successful
+func (d *Daemon) signalParentSuccess() {
+	if d.pipeFD <= 0 {
+		return
+	}
+	// Write a single byte to indicate success
+	unix.Write(d.pipeFD, []byte{1})
+	// Close the pipe after signaling
+	unix.Close(d.pipeFD)
+	d.pipeFD = 0
+}
