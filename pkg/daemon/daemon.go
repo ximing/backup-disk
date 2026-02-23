@@ -30,7 +30,7 @@ const (
 type Daemon struct {
 	cfg        *config.Config
 	scheduler  *scheduler.TaskScheduler
-	storage    storage.Storage
+	storages   []storage.Storage
 	logger     *logger.Logger
 	stateStore *state.Store
 	pidFile    string
@@ -61,12 +61,12 @@ type TaskStatus struct {
 
 // New creates a new daemon instance
 func New(cfg *config.Config, log *logger.Logger, dataDir string) (*Daemon, error) {
-	var store storage.Storage
+	var storages []storage.Storage
 	var err error
 
 	if cfg != nil {
-		// Create storage backend
-		store, err = storage.NewStorage(cfg)
+		// Create storage backends for all configured storages
+		storages, err = storage.NewStoragesFromBackends(cfg.Storage)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create storage: %w", err)
 		}
@@ -82,7 +82,7 @@ func New(cfg *config.Config, log *logger.Logger, dataDir string) (*Daemon, error
 
 	d := &Daemon{
 		cfg:        cfg,
-		storage:    store,
+		storages:   storages,
 		logger:     log,
 		stateStore: stateStore,
 		pidFile:    pidFile,
@@ -120,10 +120,12 @@ func (d *Daemon) Start(foreground bool) error {
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 
-	// Validate storage connection
+	// Validate all storage connections
 	ctx := context.Background()
-	if err := d.storage.Validate(ctx); err != nil {
-		return fmt.Errorf("storage validation failed: %w", err)
+	for i, s := range d.storages {
+		if err := s.Validate(ctx); err != nil {
+			return fmt.Errorf("storage %d validation failed: %w", i, err)
+		}
 	}
 
 	d.mu.Lock()
@@ -303,8 +305,24 @@ func (d *Daemon) handleTask(ctx context.Context, task scheduler.TaskConfig) erro
 		ArchiveName:       task.Compression.ArchiveName,
 	}
 
+	// Get storage backends for this task
+	taskBackends := d.cfg.GetBackendsForTask(*taskCfg)
+	if len(taskBackends) == 0 {
+		return fmt.Errorf("no storage backends available for task: %s", task.Name)
+	}
+
+	// Create storage instances for this task's backends
+	var taskStorages []storage.Storage
+	for _, backend := range taskBackends {
+		s, err := storage.NewStorageFromBackend(backend)
+		if err != nil {
+			return fmt.Errorf("failed to create storage for backend '%s': %w", backend.Name, err)
+		}
+		taskStorages = append(taskStorages, s)
+	}
+
 	// Execute the sync
-	executor := syncpkg.NewExecutor(d.storage, d.logger)
+	executor := syncpkg.NewExecutorWithStorages(taskStorages, d.logger)
 	opts := syncpkg.Options{
 		DryRun:      false,
 		DateFormat:  task.Target.DateFormat,
@@ -454,14 +472,14 @@ func (d *Daemon) reload() {
 	d.mu.Lock()
 	d.cfg = cfg
 
-	// Create new storage backend with new config
-	newStorage, err := storage.NewStorage(cfg)
+	// Create new storage backends with new config
+	newStorages, err := storage.NewStoragesFromBackends(cfg.Storage)
 	if err != nil {
 		d.mu.Unlock()
-		d.logger.Errorf("Failed to create new storage: %v", err)
+		d.logger.Errorf("Failed to create new storages: %v", err)
 		return
 	}
-	d.storage = newStorage
+	d.storages = newStorages
 	d.mu.Unlock()
 
 	// Restart scheduler with new tasks

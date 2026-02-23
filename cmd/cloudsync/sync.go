@@ -96,24 +96,23 @@ func runSync(cmd *cobra.Command, args []string, dryRun bool) error {
 	}
 	defer stateStore.Close()
 
-	// Initialize storage
-	store, err := storage.NewStorage(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to create storage: %w", err)
-	}
-
-	// Validate storage connection
+	// Validate storage connection for all backends
 	ctx := context.Background()
-	if err := store.Validate(ctx); err != nil {
-		return fmt.Errorf("storage validation failed: %w", err)
+	for _, backend := range cfg.Storage {
+		store, err := storage.NewStorageFromBackend(backend)
+		if err != nil {
+			return fmt.Errorf("failed to create storage for backend '%s': %w", backend.Name, err)
+		}
+		if err := store.Validate(ctx); err != nil {
+			return fmt.Errorf("storage validation failed for backend '%s': %w", backend.Name, err)
+		}
 	}
 
 	// Execute tasks
-	executor := syncpkg.NewExecutor(store, log)
 	var results []*syncpkg.Result
 
 	for _, task := range tasks {
-		result := executeTaskWithState(ctx, executor, stateStore, log, cfg, task, dryRun)
+		result := executeTaskWithState(ctx, stateStore, log, cfg, task, dryRun)
 		results = append(results, result)
 	}
 
@@ -149,7 +148,31 @@ func runSync(cmd *cobra.Command, args []string, dryRun bool) error {
 }
 
 // executeTaskWithState executes a task and records its state
-func executeTaskWithState(ctx context.Context, executor *syncpkg.Executor, stateStore *state.Store, log *logger.Logger, cfg *config.Config, task config.TaskConfig, dryRun bool) *syncpkg.Result {
+func executeTaskWithState(ctx context.Context, stateStore *state.Store, log *logger.Logger, cfg *config.Config, task config.TaskConfig, dryRun bool) *syncpkg.Result {
+	// Get storage backends for this task
+	taskBackends := cfg.GetBackendsForTask(task)
+	if len(taskBackends) == 0 {
+		return &syncpkg.Result{
+			TaskName: task.Name,
+			Success:  false,
+			Error:    fmt.Errorf("no storage backends available for task"),
+		}
+	}
+
+	// Create storage instances for this task's backends
+	var taskStorages []storage.Storage
+	for _, backend := range taskBackends {
+		s, err := storage.NewStorageFromBackend(backend)
+		if err != nil {
+			return &syncpkg.Result{
+				TaskName: task.Name,
+				Success:  false,
+				Error:    fmt.Errorf("failed to create storage for backend '%s': %w", backend.Name, err),
+			}
+		}
+		taskStorages = append(taskStorages, s)
+	}
+
 	// Start execution recording
 	execID, err := stateStore.StartExecution(task.Name)
 	if err != nil {
@@ -174,6 +197,9 @@ func executeTaskWithState(ctx context.Context, executor *syncpkg.Executor, state
 		Compression: compressionConfig,
 		MaxRetries:  cfg.Global.MaxRetries,
 	}
+
+	// Create executor with task-specific storages
+	executor := syncpkg.NewExecutorWithStorages(taskStorages, log)
 
 	// Execute the task
 	result, err := executor.Execute(ctx, task, opts)

@@ -50,67 +50,82 @@ func runTest(cmd *cobra.Command, args []string) error {
 	}
 
 	// Display storage configuration
-	fmt.Printf("Storage Type: %s\n", cfg.Storage.Type)
-	switch cfg.Storage.Type {
-	case "s3":
-		fmt.Printf("  Region: %s\n", cfg.Storage.S3.Region)
-		fmt.Printf("  Bucket: %s\n", cfg.Storage.S3.Bucket)
-		if cfg.Storage.S3.Endpoint != "" {
-			fmt.Printf("  Endpoint: %s\n", cfg.Storage.S3.Endpoint)
+	fmt.Printf("Configured Backends: %d\n\n", len(cfg.Storage))
+
+	allSuccess := true
+	var totalElapsed time.Duration
+
+	for _, backend := range cfg.Storage {
+		fmt.Printf("Backend: %s (%s)\n", backend.Name, backend.Type)
+		switch backend.Type {
+		case "s3":
+			fmt.Printf("  Region: %s\n", backend.S3.Region)
+			fmt.Printf("  Bucket: %s\n", backend.S3.Bucket)
+			if backend.S3.Endpoint != "" {
+				fmt.Printf("  Endpoint: %s\n", backend.S3.Endpoint)
+			}
+		case "oss":
+			fmt.Printf("  Endpoint: %s\n", backend.OSS.Endpoint)
+			fmt.Printf("  Bucket: %s\n", backend.OSS.Bucket)
 		}
-	case "oss":
-		fmt.Printf("  Endpoint: %s\n", cfg.Storage.OSS.Endpoint)
-		fmt.Printf("  Bucket: %s\n", cfg.Storage.OSS.Bucket)
-	}
-	fmt.Println()
-
-	// Create storage instance
-	fmt.Printf("Creating storage client...\n")
-	store, err := storage.NewStorage(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to create storage client: %w", err)
-	}
-
-	// Test connection with timeout
-	fmt.Printf("Testing connection (timeout: %ds)...\n", timeout)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-	defer cancel()
-
-	start := time.Now()
-	if err := store.Validate(ctx); err != nil {
-		fmt.Println()
-		fmt.Println("Connection test FAILED")
 		fmt.Println()
 
-		// Provide helpful error messages
-		switch {
-		case isTimeoutError(err):
-			fmt.Println("Error: Connection timeout")
-			fmt.Println("  - Check your network connection")
-			fmt.Println("  - Verify the endpoint URL is correct")
-			fmt.Println("  - Check if a firewall is blocking the connection")
-		case isCredentialError(err):
-			fmt.Println("Error: Invalid credentials")
-			fmt.Println("  - Check your access key and secret key")
-			fmt.Println("  - Verify the credentials have not expired")
-			fmt.Println("  - Ensure the credentials have sufficient permissions")
-		case isBucketError(err):
-			fmt.Println("Error: Bucket not accessible")
-			fmt.Println("  - Verify the bucket name is correct")
-			fmt.Println("  - Check if the bucket exists")
-			fmt.Println("  - Ensure you have permission to access this bucket")
-		default:
-			fmt.Printf("Error: %v\n", err)
+		// Create storage instance
+		fmt.Printf("Testing connection...\n")
+		store, err := storage.NewStorageFromBackend(backend)
+		if err != nil {
+			fmt.Printf("  FAILED: %v\n\n", err)
+			allSuccess = false
+			continue
 		}
-		return fmt.Errorf("connection test failed")
+
+		// Test connection with timeout
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+
+		start := time.Now()
+		err = store.Validate(ctx)
+		elapsed := time.Since(start)
+		totalElapsed += elapsed
+		cancel()
+
+		if err != nil {
+			fmt.Println("  FAILED")
+			fmt.Println()
+
+			// Provide helpful error messages
+			switch {
+			case isTimeoutError(err):
+				fmt.Println("  Error: Connection timeout")
+				fmt.Println("    - Check your network connection")
+				fmt.Println("    - Verify the endpoint URL is correct")
+				fmt.Println("    - Check if a firewall is blocking the connection")
+			case isCredentialError(err):
+				fmt.Println("  Error: Invalid credentials")
+				fmt.Println("    - Check your access key and secret key")
+				fmt.Println("    - Verify the credentials have not expired")
+				fmt.Println("    - Ensure the credentials have sufficient permissions")
+			case isBucketError(err):
+				fmt.Println("  Error: Bucket not accessible")
+				fmt.Println("    - Verify the bucket name is correct")
+				fmt.Println("    - Check if the bucket exists")
+				fmt.Println("    - Ensure you have permission to access this bucket")
+			default:
+				fmt.Printf("  Error: %v\n", err)
+			}
+			allSuccess = false
+		} else {
+			fmt.Printf("  SUCCESS (response time: %v)\n", elapsed.Round(time.Millisecond))
+		}
+		fmt.Println()
 	}
 
-	elapsed := time.Since(start)
 	fmt.Println()
-	fmt.Println("Connection test SUCCESS!")
-	fmt.Printf("  Response time: %v\n", elapsed.Round(time.Millisecond))
-	fmt.Println()
-	fmt.Println("Configuration is ready for sync operations.")
+	if allSuccess {
+		fmt.Printf("All backends tested successfully (total time: %v)\n", totalElapsed.Round(time.Millisecond))
+		fmt.Println("Configuration is ready for sync operations.")
+	} else {
+		return fmt.Errorf("one or more backend tests failed")
+	}
 
 	return nil
 }

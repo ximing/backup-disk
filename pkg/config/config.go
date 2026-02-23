@@ -12,11 +12,11 @@ import (
 
 // Config represents the main configuration structure
 type Config struct {
-	Global    GlobalConfig    `yaml:"global"`
-	Storage   StorageConfig   `yaml:"storage"`
-	Tasks     []TaskConfig    `yaml:"tasks"`
-	Retention RetentionConfig `yaml:"retention"`
-	Notify    NotifyConfig    `yaml:"notify"`
+	Global    GlobalConfig      `yaml:"global"`
+	Storage   []StorageBackend  `yaml:"storage"`
+	Tasks     []TaskConfig      `yaml:"tasks"`
+	Retention RetentionConfig   `yaml:"retention"`
+	Notify    NotifyConfig      `yaml:"notify"`
 }
 
 // GlobalConfig represents global settings
@@ -26,7 +26,15 @@ type GlobalConfig struct {
 	MaxRetries int         `yaml:"max_retries,omitempty"` // Default: 3
 }
 
-// StorageConfig represents storage backend configuration
+// StorageBackend represents a single storage backend configuration
+type StorageBackend struct {
+	Name   string    `yaml:"name"` // unique identifier for this backend
+	Type   string    `yaml:"type"` // s3 or oss
+	S3     S3Config  `yaml:"s3,omitempty"`
+	OSS    OSSConfig `yaml:"oss,omitempty"`
+}
+
+// StorageConfig represents storage backend configuration (deprecated, kept for compatibility)
 type StorageConfig struct {
 	Type string    `yaml:"type"` // s3 or oss
 	S3   S3Config  `yaml:"s3"`
@@ -71,8 +79,9 @@ type SourceConfig struct {
 
 // TargetConfig represents target storage configuration
 type TargetConfig struct {
-	Prefix      string `yaml:"prefix"`
-	DateFormat  string `yaml:"date_format,omitempty"`
+	Prefix      string   `yaml:"prefix"`
+	DateFormat  string   `yaml:"date_format,omitempty"`
+	Backends    []string `yaml:"backends,omitempty"` // Backend names to use, empty = first, ["all"] = all backends
 }
 
 // CompressionConfig represents compression settings
@@ -181,23 +190,38 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) validateStorage() error {
-	switch strings.ToLower(c.Storage.Type) {
-	case "s3":
-		if c.Storage.S3.Bucket == "" {
-			return fmt.Errorf("S3 bucket is required")
+	if len(c.Storage) == 0 {
+		return fmt.Errorf("at least one storage backend must be configured")
+	}
+
+	backendNames := make(map[string]bool)
+	for i, backend := range c.Storage {
+		if backend.Name == "" {
+			return fmt.Errorf("storage backend %d: name is required", i)
 		}
-		if c.Storage.S3.Region == "" {
-			return fmt.Errorf("S3 region is required")
+		if backendNames[backend.Name] {
+			return fmt.Errorf("duplicate storage backend name: %s", backend.Name)
 		}
-	case "oss":
-		if c.Storage.OSS.Bucket == "" {
-			return fmt.Errorf("OSS bucket is required")
+		backendNames[backend.Name] = true
+
+		switch strings.ToLower(backend.Type) {
+		case "s3":
+			if backend.S3.Bucket == "" {
+				return fmt.Errorf("S3 backend '%s': bucket is required", backend.Name)
+			}
+			if backend.S3.Region == "" {
+				return fmt.Errorf("S3 backend '%s': region is required", backend.Name)
+			}
+		case "oss":
+			if backend.OSS.Bucket == "" {
+				return fmt.Errorf("OSS backend '%s': bucket is required", backend.Name)
+			}
+			if backend.OSS.Endpoint == "" {
+				return fmt.Errorf("OSS backend '%s': endpoint is required", backend.Name)
+			}
+		default:
+			return fmt.Errorf("backend '%s': unsupported storage type: %s (must be 's3' or 'oss')", backend.Name, backend.Type)
 		}
-		if c.Storage.OSS.Endpoint == "" {
-			return fmt.Errorf("OSS endpoint is required")
-		}
-	default:
-		return fmt.Errorf("unsupported storage type: %s (must be 's3' or 'oss')", c.Storage.Type)
 	}
 	return nil
 }
@@ -221,13 +245,64 @@ func (c *Config) validateTask(task TaskConfig, index int) error {
 		return fmt.Errorf("task %s: invalid schedule: %w", task.Name, err)
 	}
 
-	// Validate date format if provided
-	if task.Target.DateFormat != "" {
-		// The format will be validated at runtime
-		// We just check it's not empty here
+	// Validate backends if specified
+	if len(task.Target.Backends) > 0 {
+		// Check if "all" is specified
+		usesAll := false
+		for _, name := range task.Target.Backends {
+			if name == "all" {
+				usesAll = true
+				break
+			}
+		}
+
+		if !usesAll {
+			// Build backend name map
+			backendMap := make(map[string]bool)
+			for _, backend := range c.Storage {
+				backendMap[backend.Name] = true
+			}
+
+			// Validate each specified backend
+			for _, name := range task.Target.Backends {
+				if !backendMap[name] {
+					return fmt.Errorf("task %s: backend '%s' not found in storage configuration", task.Name, name)
+				}
+			}
+		}
 	}
 
 	return nil
+}
+
+// GetBackendsForTask returns the list of storage backends for a task
+func (c *Config) GetBackendsForTask(task TaskConfig) []StorageBackend {
+	if len(task.Target.Backends) == 0 {
+		// Default to first backend
+		if len(c.Storage) > 0 {
+			return []StorageBackend{c.Storage[0]}
+		}
+		return nil
+	}
+
+	// Check for "all" keyword
+	for _, name := range task.Target.Backends {
+		if name == "all" {
+			return c.Storage
+		}
+	}
+
+	// Find specified backends
+	var result []StorageBackend
+	for _, name := range task.Target.Backends {
+		for _, backend := range c.Storage {
+			if backend.Name == name {
+				result = append(result, backend)
+				break
+			}
+		}
+	}
+	return result
 }
 
 // validateSchedule validates a cron schedule expression

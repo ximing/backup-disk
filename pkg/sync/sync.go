@@ -99,15 +99,23 @@ type Options struct {
 
 // Executor handles task execution
 type Executor struct {
-	storage storage.Storage
-	logger  *logger.Logger
+	storages []storage.Storage
+	logger   *logger.Logger
 }
 
-// NewExecutor creates a new sync executor
-func NewExecutor(storage storage.Storage, logger *logger.Logger) *Executor {
+// NewExecutor creates a new sync executor with a single storage
+func NewExecutor(s storage.Storage, log *logger.Logger) *Executor {
 	return &Executor{
-		storage: storage,
-		logger:  logger,
+		storages: []storage.Storage{s},
+		logger:   log,
+	}
+}
+
+// NewExecutorWithStorages creates a new sync executor with multiple storages
+func NewExecutorWithStorages(storages []storage.Storage, logger *logger.Logger) *Executor {
+	return &Executor{
+		storages: storages,
+		logger:   logger,
 	}
 }
 
@@ -248,16 +256,17 @@ func (e *Executor) executeArchiveMode(ctx context.Context, task config.TaskConfi
 		retryConfig.MaxRetries = 3
 	}
 
-	err = retry.Retry(ctx, retryConfig, retry.IsRecoverableError, func() error {
-		return e.storage.Upload(ctx, archivePath, remotePath)
+	// Upload to all storage backends
+	uploadErr := e.uploadToAllStorages(ctx, retryConfig, func(s storage.Storage) error {
+		return s.Upload(ctx, archivePath, remotePath)
 	})
 
-	if err != nil {
+	if uploadErr != nil {
 		// Record all files as failed
 		for _, f := range files {
 			stats.IncrementFilesFailed(f.RelativePath)
 		}
-		return fmt.Errorf("failed to upload archive: %w", err)
+		return fmt.Errorf("failed to upload archive: %w", uploadErr)
 	}
 
 	// Record success for all files
@@ -384,11 +393,26 @@ func (e *Executor) doUpload(ctx context.Context, file scanner.FileInfo, remotePa
 		uploadPath = tempFile.Name()
 	}
 
-	// Upload file
-	if err := e.storage.Upload(ctx, uploadPath, remotePath); err != nil {
-		return fmt.Errorf("failed to upload: %w", err)
+	// Upload file to all storage backends
+	for i, s := range e.storages {
+		if err := s.Upload(ctx, uploadPath, remotePath); err != nil {
+			return fmt.Errorf("failed to upload to storage %d: %w", i, err)
+		}
 	}
 
+	return nil
+}
+
+// uploadToAllStorages uploads to all storage backends with retry
+func (e *Executor) uploadToAllStorages(ctx context.Context, retryConfig retry.Config, uploadFn func(storage.Storage) error) error {
+	for i, s := range e.storages {
+		err := retry.Retry(ctx, retryConfig, retry.IsRecoverableError, func() error {
+			return uploadFn(s)
+		})
+		if err != nil {
+			return fmt.Errorf("storage %d: %w", i, err)
+		}
+	}
 	return nil
 }
 
