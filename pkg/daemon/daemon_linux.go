@@ -12,6 +12,12 @@ import (
 
 // daemonizeImpl implements daemonization for Linux
 func (d *Daemon) daemonizeImpl() error {
+	// Get executable path (must use absolute path for ForkExec)
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+
 	// Use syscall.ForkExec for proper daemonization
 	sysProcAttr := &syscall.SysProcAttr{
 		Setsid: true,
@@ -25,7 +31,7 @@ func (d *Daemon) daemonizeImpl() error {
 	}
 
 	// Fork and exec
-	pid, err := syscall.ForkExec(os.Args[0], os.Args, procAttr)
+	pid, err := syscall.ForkExec(execPath, os.Args, procAttr)
 	if err != nil {
 		return fmt.Errorf("fork failed: %w", err)
 	}
