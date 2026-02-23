@@ -14,9 +14,18 @@ import (
 // daemonizeImpl implements daemonization for Linux
 func (d *Daemon) daemonizeImpl() error {
 	// Get executable path (must use absolute path for ForkExec)
-	execPath, err := os.Executable()
+	// Try /proc/self/exe first (most reliable on Linux), fallback to os.Executable()
+	execPath, err := os.Readlink("/proc/self/exe")
 	if err != nil {
-		return fmt.Errorf("failed to get executable path: %w", err)
+		execPath, err = os.Executable()
+		if err != nil {
+			return fmt.Errorf("failed to get executable path: %w", err)
+		}
+	}
+
+	// Verify the executable exists
+	if _, err := os.Stat(execPath); err != nil {
+		return fmt.Errorf("executable not found at %s: %w", execPath, err)
 	}
 
 	// Get error file path from environment (set by parent)
