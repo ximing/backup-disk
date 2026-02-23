@@ -30,21 +30,16 @@ func NewDaemonCommand() *cobra.Command {
 
 // NewDaemonStartCommand creates the daemon start command
 func NewDaemonStartCommand() *cobra.Command {
-	var foreground bool
-
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "启动守护进程",
 		Long: `启动 CloudSync 守护进程，按计划自动执行备份任务。
 
-默认在前台运行，建议使用 systemd 或其他进程管理器来管理守护进程。
+在前台运行，建议使用 systemd 或其他进程管理器来管理后台守护进程。
 
 示例:
-  # 前台启动守护进程（默认）
+  # 前台启动守护进程
   cloudsync daemon start
-
-  # 前台运行模式（用于调试，与默认行为相同）
-  cloudsync daemon start --foreground
 
   # 使用 systemd 管理守护进程（推荐用于 Linux）
   # 1. 复制 scripts/cloudsync.service 到 /etc/systemd/system/
@@ -52,11 +47,9 @@ func NewDaemonStartCommand() *cobra.Command {
   # 3. sudo systemctl enable cloudsync
   # 4. sudo systemctl start cloudsync`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDaemonStart(foreground)
+			return runDaemonStart()
 		},
 	}
-
-	cmd.Flags().BoolVar(&foreground, "foreground", true, "前台运行模式（默认开启，保留用于兼容性）")
 
 	return cmd
 }
@@ -91,7 +84,7 @@ func NewDaemonStatusCommand() *cobra.Command {
 	}
 }
 
-func runDaemonStart(foreground bool) error {
+func runDaemonStart() error {
 	// Load configuration
 	cfg, err := config.Load(config.GetConfigPath())
 	if err != nil {
@@ -121,14 +114,14 @@ func runDaemonStart(foreground bool) error {
 		return fmt.Errorf("failed to create daemon: %w", err)
 	}
 
-	fmt.Println("Starting daemon in foreground mode...")
+	fmt.Println("Starting daemon...")
 	fmt.Println("Press Ctrl+C to stop")
 	fmt.Println()
 	fmt.Println("Tip: Use systemd or another process manager to run the daemon in background.")
 	fmt.Println("     See scripts/cloudsync.service for an example systemd service file.")
 	fmt.Println()
 
-	return d.Start(true)
+	return d.Start()
 }
 
 func runDaemonStop() error {

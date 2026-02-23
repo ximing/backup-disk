@@ -97,8 +97,8 @@ func New(cfg *config.Config, log *logger.Logger, dataDir string) (*Daemon, error
 	return d, nil
 }
 
-// Start starts the daemon
-func (d *Daemon) Start(foreground bool) error {
+// Start starts the daemon (runs in foreground only)
+func (d *Daemon) Start() error {
 	// Check if already running
 	if existingPID, err := d.readPIDFile(); err == nil && existingPID > 0 {
 		if isProcessRunning(existingPID) {
