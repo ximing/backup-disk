@@ -182,6 +182,75 @@ launchctl load ~/Library/LaunchAgents/com.cloudsync.daemon.plist
 launchctl start com.cloudsync.daemon
 ```
 
+### PM2（跨平台，适合已有 Node.js 环境的用户）
+
+[PM2](https://pm2.keymetrics.io/) 是一个流行的进程管理器，支持 Linux、macOS 和 Windows。
+
+**1. 安装 PM2**
+
+```bash
+npm install -g pm2
+```
+
+**2. 创建 ecosystem 配置文件**
+
+创建 `cloudsync.ecosystem.json`：
+
+```json
+{
+  "apps": [
+    {
+      "name": "cloudsync",
+      "script": "/usr/local/bin/cloudsync",
+      "args": "daemon start",
+      "instances": 1,
+      "autorestart": true,
+      "watch": false,
+      "max_memory_restart": "500M",
+      "env": {
+        "NODE_ENV": "production",
+        "HOME": "/home/backup"
+      },
+      "log_file": "~/.cloudsync/logs/combined.log",
+      "out_file": "~/.cloudsync/logs/out.log",
+      "error_file": "~/.cloudsync/logs/error.log",
+      "log_date_format": "YYYY-MM-DD HH:mm:ss Z",
+      "merge_logs": true
+    }
+  ]
+}
+```
+
+**3. 启动服务**
+
+```bash
+# 使用配置文件启动
+pm2 start cloudsync.ecosystem.json
+
+# 查看状态
+pm2 status
+pm2 logs cloudsync
+
+# 设置开机自启
+pm2 startup
+pm2 save
+
+# 重启/停止/删除
+pm2 restart cloudsync
+pm2 stop cloudsync
+pm2 delete cloudsync
+```
+
+**4. 查看日志**
+
+```bash
+# 实时查看日志
+pm2 logs cloudsync
+
+# 查看最近 100 行
+pm2 logs cloudsync --lines 100
+```
+
 ## 配置文件
 
 配置文件位于 `~/.cloudsync/config.yaml`：
