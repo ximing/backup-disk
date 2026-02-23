@@ -218,6 +218,9 @@ func (d *Daemon) Start(foreground bool) error {
 
 	// Register all tasks
 	if err := d.registerTasks(); err != nil {
+		if !foreground {
+			d.writeStartupError(fmt.Sprintf("failed to register tasks: %v", err))
+		}
 		return fmt.Errorf("failed to register tasks: %w", err)
 	}
 
