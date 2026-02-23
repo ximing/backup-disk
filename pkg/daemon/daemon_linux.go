@@ -71,7 +71,7 @@ func (d *Daemon) daemonizeImpl() error {
 					if childPID == pid {
 						// Success! Child started and wrote its PID
 						fmt.Printf("Daemon started successfully (PID: %d)\n", pid)
-						os.Exit(0)
+						return nil
 					}
 				}
 			}
